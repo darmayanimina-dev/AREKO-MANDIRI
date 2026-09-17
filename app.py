@@ -62,26 +62,34 @@ st.markdown("""
         background-color: #ffffff;
         border: 1px dashed #cbd5e1;
         border-radius: 12px;
-        padding: 44px 20px;
-        text-align: center;
+        padding: 50px 24px;
+        text-align: center !important;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
         margin-top: 20px;
+        width: 100%;
     }
     .empty-state-icon {
-        font-size: 2.6rem;
-        margin-bottom: 10px;
+        font-size: 2.8rem;
+        margin-bottom: 12px;
+        text-align: center !important;
     }
     .empty-state-title {
-        font-size: 1.1rem;
+        font-size: 1.15rem;
         font-weight: 700;
         color: #0f172a;
-        margin-bottom: 6px;
+        margin-bottom: 8px;
+        text-align: center !important;
     }
     .empty-state-desc {
         font-size: 0.88rem;
         color: #64748b;
-        max-width: 520px;
-        margin: 0 auto;
-        line-height: 1.5;
+        max-width: 540px;
+        margin: 0 auto !important;
+        line-height: 1.6;
+        text-align: center !important;
     }
 
     /* Download Cards */
@@ -294,10 +302,10 @@ if st.session_state.get("resume_list"):
 else:
     # KONDISI AWAL (EMPTY STATE)
     st.markdown("""
-    <div class="empty-state-box">
-        <div class="empty-state-icon">📄</div>
-        <div class="empty-state-title">Belum Ada Rekening Koran yang Diproses</div>
-        <p class="empty-state-desc">
+    <div class="empty-state-box" style="text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+        <div class="empty-state-icon" style="text-align: center;">📄</div>
+        <div class="empty-state-title" style="text-align: center;">Belum Ada Rekening Koran yang Diproses</div>
+        <p class="empty-state-desc" style="text-align: center; margin: 0 auto;">
             Silakan unggah berkas PDF rekening koran di atas, lengkapi parameter dokumen di sidebar, lalu klik <b>Ekstraksi & Rekap Data</b> untuk menampilkan tabel ringkasan mutasi dan mengunduh formulir validasi.
         </p>
     </div>
