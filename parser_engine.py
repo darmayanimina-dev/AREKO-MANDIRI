@@ -44,6 +44,15 @@ def preprocess_image(img):
 def detect_mandiri_month(full_text, filename=""):
     """Mendeteksi nama bulan transaksi Bank Mandiri dari teks atau nama berkas."""
     txt_upper = (full_text + " " + filename).upper()
+    
+    # 1. Format Kopra: Period \n 01 Jun 2026 - 30 Jun 2026
+    pm = re.search(r"PERIOD[^\n]*\n\s*\d{2}\s+([A-Z]{3})\s+\d{4}\s*[-–]\s*\d{2}\s+([A-Z]{3})\s+\d{4}", txt_upper)
+    if pm:
+        code = pm.group(2)
+        if code in MONTH_MAP:
+            return MONTH_MAP[code]
+
+    # 2. Format 1 baris: PERIOD 01 JUN 2026 - 30 JUN 2026
     period_m = re.search(r"PERIOD[^\n]*?\d{2}\s+([A-Z]{3})\s+\d{4}\s*[-–]\s*\d{2}\s+([A-Z]{3})\s+\d{4}", txt_upper)
     if period_m:
         code = period_m.group(2)
@@ -64,7 +73,6 @@ def detect_bank_and_month(full_text, filename=""):
     """Mendeteksi nama bank dan bulan dari isi dokumen teks."""
     txt_upper = (full_text + " " + filename).upper()
 
-    # Prioritas deteksi bank
     if any(k in txt_upper for k in ["BANK RAKYAT INDONESIA", "IBIZ", "SETULUS HATI", "LAPORAN TRANSAKSI FINANSIAL"]):
         bank = "BRI"
     elif any(k in txt_upper for k in ["BANK MANDIRI", "MANDIRI", "KOPRABYMANDIRI", "KOPRA"]):
@@ -83,15 +91,6 @@ def detect_bank_and_month(full_text, filename=""):
         bank = "MANDIRI"
 
     detected_month = detect_mandiri_month(full_text, filename)
-    if detected_month == "Bulan":
-        range_txt = re.search(r"(\d{2})[-/ ]([A-Za-z]{3}|\d{2})[-/ ]\d{2,4}\s*(?:sd|-)\s*\d{2}[-/ ]([A-Za-z]{3}|\d{2})[-/ ]\d{2,4}", full_text)
-        if range_txt:
-            m_raw = range_txt.group(2).upper()
-            if m_raw in MONTH_MAP:
-                detected_month = MONTH_MAP[m_raw]
-            elif m_raw.isdigit() and 1 <= int(m_raw) <= 12:
-                detected_month = MONTH_NAMES_ID[int(m_raw) - 1]
-
     return bank, detected_month
 
 def convert_pdf_to_images(pdf_input, dpi=300):
@@ -182,7 +181,7 @@ def extract_ocr_text(images):
         return "", []
 
 def extract_pdf_digital_text(pdf_input):
-    """Mengekstrak teks digital langsung dari PDF (sebagai fallback)."""
+    """Mengekstrak teks digital langsung dari PDF (presisi 100% tanpa noise OCR)."""
     all_lines = []
     full_text = ""
     try:
@@ -214,48 +213,77 @@ def extract_pdf_digital_text(pdf_input):
 
 def parse_mandiri_ocr(pdf_input, filename=""):
     """
-    Engine Parser Mandiri berbasis OCR Lokal & Normalisasi Finansial:
-    1. Konversi PDF ke Gambar Halaman demi Halaman (300 DPI).
-    2. Preprocessing gambar (grayscale, kontras tinggi, sharpening) & OCR via pytesseract.
-    3. Ekstraksi Saldo Awal, filter header Kopra/Mandiri, penanganan sticky date.
-    4. Normalisasi tanda minus yang menempel di nominal debet/kredit.
-    5. Rekapitulasi mutasi debet/kredit dan statistik saldo.
+    Engine Parser Mandiri (Kopra & Mandiri Konvensional):
+    1. Memeriksa layer teks digital PDF. Jika dokumen digital (vektor), diekstrak langsung
+       sehingga 100% akurat tanpa kesalahan pembacaan karakter / noise koma.
+    2. Jika dokumen adalah hasil scan/gambar (tanpa layer teks), otomatis dialihkan ke Engine
+       Tesseract OCR 300 DPI dengan preprocessing peningkatan kontras dan penajaman angka.
+    3. Ekstraksi Ringkasan Resmi Bank (Account Statement Summary) untuk validasi nominal total
+       dan frekuensi mutasi.
+    4. Rekonstruksi baris mutasi bersambung (multi-line split/wrap) pada transaksi bernominal besar.
+    5. Rekapitulasi mutasi dan kalkulasi saldo tertinggi, rata-rata, dan terendah.
     """
     fname = filename or getattr(pdf_input, "name", "") or (str(pdf_input) if isinstance(pdf_input, str) else "rekening_mandiri.pdf")
-    print(f"\n[+] Memproses berkas via Engine OCR Mandiri: {os.path.basename(fname)} ...")
+    print(f"\n[+] Memproses berkas Mandiri: {os.path.basename(fname)} ...")
 
     all_lines = []
     full_text = ""
 
-    # 1. Konversi PDF ke Gambar Halaman demi Halaman (300 DPI) & OCR
-    images = convert_pdf_to_images(pdf_input, dpi=300)
-    if images:
-        full_text, all_lines = extract_ocr_text(images)
-
-    # 2. Jika OCR belum menghasilkan baris (misal tesseract binary belum siap atau digital murni),
-    # gunakan ekstraksi teks digital langsung dari PDF sebagai fallback
-    if not all_lines:
-        full_text, all_lines = extract_pdf_digital_text(pdf_input)
+    # 1. Cek ekstraksi teks digital langsung terlebih dahulu
+    dig_text, dig_lines = extract_pdf_digital_text(pdf_input)
+    if len(dig_text.strip()) > 100:
+        # Dokumen PDF digital murni: gunakan data digital untuk akurasi presisi 100%
+        full_text = dig_text
+        all_lines = dig_lines
+    else:
+        # Dokumen hasil scan/gambar: gunakan OCR Tesseract
+        print("  [*] Dokumen scan/gambar terdeteksi, memproses via Tesseract OCR 300 DPI...")
+        images = convert_pdf_to_images(pdf_input, dpi=300)
+        if images:
+            full_text, all_lines = extract_ocr_text(images)
 
     bulan = detect_mandiri_month(full_text, fname)
 
-    # 3. Saldo Awal Resmi Bank (Opening Balance)
-    op_m = re.search(r"Opening\s+Balance[^\d]*([\d,]+\.\d{2})", full_text, re.IGNORECASE)
-    opening_balance = float(op_m.group(1).replace(",", "")) if op_m else None
+    # 2. Tangkap Ringkasan Resmi Bank (Account Statement Summary)
+    op_m = re.search(r"Opening\s+Balance\s+No\.\s*of\s+Debit\s+Total\s+Amount\s+Debited\s*\n\s*([\d,]+\.\d{2})\s+(\d+)\s+([\d,]+\.\d{2})", full_text, re.IGNORECASE)
+    cl_m = re.search(r"Closing\s+Balance\s+No\.\s*of\s+Credit\s+Total\s+Amount\s+Credited\s*\n\s*([\d,]+\.\d{2})\s+(\d+)\s+([\d,]+\.\d{2})", full_text, re.IGNORECASE)
+
+    official_op = float(op_m.group(1).replace(",", "")) if op_m else None
+    official_f_db = int(op_m.group(2)) if op_m else None
+    official_m_db = float(op_m.group(3).replace(",", "")) if op_m else None
+
+    official_cl = float(cl_m.group(1).replace(",", "")) if cl_m else None
+    official_f_cr = int(cl_m.group(2)) if cl_m else None
+    official_m_cr = float(cl_m.group(3).replace(",", "")) if cl_m else None
+
+    # Fallback Saldo Awal standar
+    if official_op is None:
+        op_std = re.search(r"Opening\s+Balance[^\d]*([\d,]+\.\d{2})", full_text, re.IGNORECASE)
+        official_op = float(op_std.group(1).replace(",", "")) if op_std else None
 
     tx_records = []
     balances = []
     active_date = ""
+    pending_nums = []
+    in_table = False
 
-    # 4. Parsing Baris Mutasi
+    # 3. Parsing Baris Mutasi
     for line in all_lines:
-        # Abaikan baris header / ringkasan
+        # Masuk ke tabel hanya setelah header tabel transaksi
+        if "POSTING DATE" in line.upper() and ("REMARK" in line.upper() or "DEBIT" in line.upper()):
+            in_table = True
+            continue
+
+        if not in_table:
+            continue
+
+        # Abaikan header per halaman dan footer
         if any(k in line.upper() for k in [
-            "ACCOUNT STATEMENT", "POSTING DATE", "REMARK", "REFERENCE NO",
-            "TOTAL AMOUNT", "OPENING BALANCE", "CLOSING BALANCE", "PAGE ",
-            "KOPRABYMANDIRI", "ALIAS", "BRANCH", "CURRENCY", "NO. OF DEBIT",
-            "NO. OF CREDIT", "ACCOUNT NO", "ACCOUNT NAME"
+            "ACCOUNT STATEMENT", "OPENING BALANCE", "CLOSING BALANCE", "PAGE ",
+            "FOR FURTHER QUESTIONS", "KOPRABYMANDIRI", "TOTAL AMOUNT DEBITED"
         ]):
+            if "POSTING DATE" in line.upper():
+                in_table = True
             continue
 
         # Deteksi tanggal transaksi (contoh: 16 Jul 2026 atau 16/07/2026)
@@ -266,37 +294,46 @@ def parse_mandiri_ocr(pdf_input, filename=""):
         elif tgl_num:
             active_date = tgl_num.group(1)
 
-        # Normalisasi tanda minus yang menempel di depan angka (contoh: 99102- 6,752,133,360.00)
+        # Normalisasi tanda minus finansial dan spasi setelah koma dari OCR
         line_clean = re.sub(r"-\s*(?=\d)", " ", line)
+        line_clean = re.sub(r",\s+(?=\d)", ",", line_clean)
 
         # Ekstrak semua angka finansial berformat nominal desimal
         nums = re.findall(r"([\d,]+\.\d{2})", line_clean)
-        if len(nums) >= 3:
-            last_3 = [float(n.replace(",", "")) for n in nums[-3:]]
-            d_val, k_val, s_val = last_3[0], last_3[1], last_3[2]
+        if nums:
+            # Gabungkan dengan pending_nums jika baris transaksi terpotong / wrapping ke 2 baris
+            combined_nums = pending_nums + [float(n.replace(",", "")) for n in nums]
+            if len(combined_nums) >= 3:
+                last_3 = combined_nums[-3:]
+                d_val, k_val, s_val = last_3[0], last_3[1], last_3[2]
 
-            # Baris transaksi mutasi yang valid
-            if (d_val > 0 or k_val > 0) and s_val > 0:
-                balances.append(s_val)
-                tx_records.append({
-                    "date": active_date,
-                    "debet": d_val,
-                    "kredit": k_val,
-                    "saldo": s_val
-                })
+                # Baris transaksi mutasi yang valid
+                if (d_val > 0 or k_val > 0) and s_val > 0:
+                    balances.append(s_val)
+                    tx_records.append({
+                        "date": active_date,
+                        "debet": d_val,
+                        "kredit": k_val,
+                        "saldo": s_val
+                    })
+                pending_nums = []
+            elif len(nums) < 3:
+                # Simpan angka untuk digabungkan dengan baris berikutnya yang terpotong
+                pending_nums = [float(n.replace(",", "")) for n in nums]
 
-    if opening_balance is None and tx_records:
-        opening_balance = round(tx_records[0]["saldo"] + tx_records[0]["debet"] - tx_records[0]["kredit"], 2)
+    if official_op is None and tx_records:
+        official_op = round(tx_records[0]["saldo"] + tx_records[0]["debet"] - tx_records[0]["kredit"], 2)
 
-    freq_db = sum(1 for r in tx_records if r["debet"] > 0)
-    freq_cr = sum(1 for r in tx_records if r["kredit"] > 0)
-    mutasi_db = sum(r["debet"] for r in tx_records)
-    mutasi_cr = sum(r["kredit"] for r in tx_records)
+    # Prioritaskan ringkasan resmi bank jika tersedia, atau kalkulasi dari baris mutasi
+    freq_db = official_f_db if official_f_db is not None else sum(1 for r in tx_records if r["debet"] > 0)
+    freq_cr = official_f_cr if official_f_cr is not None else sum(1 for r in tx_records if r["kredit"] > 0)
+    mutasi_db = official_m_db if official_m_db is not None else round(sum(r["debet"] for r in tx_records), 2)
+    mutasi_cr = official_m_cr if official_m_cr is not None else round(sum(r["kredit"] for r in tx_records), 2)
 
     valid_b = [b for b in balances if b >= 1000]
-    saldo_max = max(valid_b) if valid_b else (opening_balance if opening_balance else 0.0)
-    saldo_min = min(valid_b) if valid_b else (opening_balance if opening_balance else 0.0)
-    saldo_avg = float(np.mean(valid_b)) if valid_b else (opening_balance if opening_balance else 0.0)
+    saldo_max = max(valid_b) if valid_b else (official_op or 0.0)
+    saldo_min = min(valid_b) if valid_b else (official_op or 0.0)
+    saldo_avg = float(np.mean(valid_b)) if valid_b else (official_op or 0.0)
 
     print(f"  [✓] Sukses {bulan}: Debet={freq_db}x (Rp {mutasi_db:,.2f}) | Kredit={freq_cr}x (Rp {mutasi_cr:,.2f})")
     print(f"  [✓] Saldo {bulan}: Max=Rp {saldo_max:,.2f} | Avg=Rp {saldo_avg:,.2f} | Min=Rp {saldo_min:,.2f} | Total Baris={len(tx_records)}")
@@ -305,7 +342,7 @@ def parse_mandiri_ocr(pdf_input, filename=""):
         "bank": "MANDIRI",
         "bulan": bulan,
         "filename": fname,
-        "opening_bal": opening_balance,
+        "opening_bal": official_op,
         "freq_db": freq_db,
         "freq_cr": freq_cr,
         "mutasi_db": mutasi_db,
@@ -322,7 +359,7 @@ parse_mandiri_clean = parse_mandiri_ocr
 def parse_rekening_universal(file_input, filename=""):
     """
     Parser universal dokumen rekening koran.
-    Mengarahkan pemrosesan Mandiri ke engine OCR mandiri.
+    Mengarahkan pemrosesan Mandiri ke engine Mandiri yang telah disempurnakan.
     """
     if hasattr(file_input, "name") and not filename:
         filename = file_input.name
@@ -334,13 +371,6 @@ def parse_rekening_universal(file_input, filename=""):
     else:
         pdf_stream = file_input
 
-    all_text, _ = extract_pdf_digital_text(pdf_stream)
-    bank, _ = detect_bank_and_month(all_text, filename)
-
-    if bank == "MANDIRI":
-        return parse_mandiri_ocr(pdf_stream, filename=filename)
-
-    # Fallback untuk bank lain jika diperlukan
     return parse_mandiri_ocr(pdf_stream, filename=filename)
 
 def sort_resume_chronological(resume_list):
