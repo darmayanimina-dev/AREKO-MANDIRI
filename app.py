@@ -147,10 +147,7 @@ with st.sidebar:
     nama_cust = st.text_input("Nama Cust", value=st.session_state.get("inp_cust", ""), key="inp_cust", placeholder="Nama lengkap customer")
     no_rek = st.text_input("Nomor Rekening", value=st.session_state.get("inp_rek", ""), key="inp_rek", placeholder="Contoh: 1230009876543")
 
-    bank_list = ["Mandiri", "BCA", "BNI", "BRI", "BSI", "BJB", "Permata", "Nobu"]
-    current_bank = st.session_state.get("inp_bank", "Mandiri")
-    bank_idx = bank_list.index(current_bank) if current_bank in bank_list else 0
-    nama_bank = st.selectbox("Nama Bank", bank_list, index=bank_idx, key="inp_bank")
+    nama_bank = st.text_input("Nama Bank", value="Mandiri", disabled=True, key="inp_bank")
 
     pemegang_rek = st.text_input("Nama Pemegang Rekening", value=st.session_state.get("inp_pemegang", ""), key="inp_pemegang", placeholder="Sesuai buku tabungan")
 
@@ -230,7 +227,7 @@ if st.session_state.get("resume_list"):
     for r in sorted_data:
         preview_rows.append({
             "Bulan": r.get("bulan", "-"),
-            "Bank": r.get("bank", nama_bank),
+            "Bank": "MANDIRI",
             "Freq Debet": r.get("freq_db", 0),
             "Freq Kredit": r.get("freq_cr", 0),
             "Total Debet (Rp)": f"{r.get('mutasi_db', 0):,.2f}",
