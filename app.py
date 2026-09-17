@@ -3,6 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from parser_engine import (
+    parse_mandiri_ocr,
     parse_rekening_universal,
     generate_form_pdf,
     generate_form_excel,
@@ -203,9 +204,9 @@ if uploaded_files:
         for i, file_obj in enumerate(uploaded_files):
             progress_bar.progress(
                 (i + 1) / len(uploaded_files),
-                text=f"Membaca berkas: {file_obj.name}...",
+                text=f"Menganalisis & mengekstrak berkas: {file_obj.name}...",
             )
-            extracted = parse_rekening_universal(file_obj)
+            extracted = parse_mandiri_ocr(file_obj)
             resume_list.append(extracted)
 
         st.session_state["resume_list"] = resume_list

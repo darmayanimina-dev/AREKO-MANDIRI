@@ -1,9 +1,12 @@
 import io
+import os
 import re
+import shutil
 import numpy as np
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from PIL import Image, ImageEnhance, ImageFilter
 import pdfplumber
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, portrait
@@ -22,13 +25,49 @@ MONTH_MAP = {
     "OKT": "Oktober", "NOV": "November", "DEC": "Desember", "DES": "Desember"
 }
 
+def get_tesseract_cmd():
+    """Mencari path binary tesseract pada sistem."""
+    tess_path = shutil.which("tesseract")
+    if not tess_path:
+        for p in ["/opt/homebrew/bin/tesseract", "/usr/local/bin/tesseract", "/usr/bin/tesseract"]:
+            if os.path.exists(p):
+                return p
+    return tess_path
+
+def preprocess_image(img):
+    """Meningkatkan kontras dan ketajaman teks angka untuk OCR."""
+    gray = img.convert("L")
+    enhancer = ImageEnhance.Contrast(gray)
+    contrasted = enhancer.enhance(2.0)
+    return contrasted.filter(ImageFilter.SHARPEN)
+
+def detect_mandiri_month(full_text, filename=""):
+    """Mendeteksi nama bulan transaksi Bank Mandiri dari teks atau nama berkas."""
+    txt_upper = (full_text + " " + filename).upper()
+    period_m = re.search(r"PERIOD[^\n]*?\d{2}\s+([A-Z]{3})\s+\d{4}\s*[-–]\s*\d{2}\s+([A-Z]{3})\s+\d{4}", txt_upper)
+    if period_m:
+        code = period_m.group(2)
+        if code in MONTH_MAP:
+            return MONTH_MAP[code]
+
+    for code, name in MONTH_MAP.items():
+        if re.search(rf"\b{code}\b", txt_upper):
+            return name
+
+    for name in MONTH_NAMES_ID:
+        if name.upper() in txt_upper:
+            return name
+
+    return "Bulan"
+
 def detect_bank_and_month(full_text, filename=""):
+    """Mendeteksi nama bank dan bulan dari isi dokumen teks."""
     txt_upper = (full_text + " " + filename).upper()
 
     # Prioritas deteksi bank
     if any(k in txt_upper for k in ["BANK RAKYAT INDONESIA", "IBIZ", "SETULUS HATI", "LAPORAN TRANSAKSI FINANSIAL"]):
         bank = "BRI"
-    elif any(k in txt_upper for k in ["BANK MANDIRI", "MANDIRI"]):
+    elif any(k in txt_upper for k in ["BANK MANDIRI", "MANDIRI", "KOPRABYMANDIRI", "KOPRA"]):
         bank = "MANDIRI"
     elif any(k in txt_upper for k in ["PERMATA", "PERMATA BANK", "PERMATABANK"]):
         bank = "PERMATA"
@@ -41,236 +80,211 @@ def detect_bank_and_month(full_text, filename=""):
     elif "NOBU" in txt_upper:
         bank = "NOBU"
     else:
-        bank = "UMUM"
+        bank = "MANDIRI"
 
-    detected_month = "Bulan"
-
-    # Deteksi rentang tanggal DD Mon YYYY atau DD/MM/YYYY
-    range_txt = re.search(r"(\d{2})[-/ ]([A-Za-z]{3}|\d{2})[-/ ]\d{2,4}\s*(?:sd|-)\s*\d{2}[-/ ]([A-Za-z]{3}|\d{2})[-/ ]\d{2,4}", full_text)
-    if range_txt:
-        m_raw = range_txt.group(2).upper()
-        if m_raw in MONTH_MAP:
-            detected_month = MONTH_MAP[m_raw]
-        elif m_raw.isdigit() and 1 <= int(m_raw) <= 12:
-            detected_month = MONTH_NAMES_ID[int(m_raw) - 1]
-
+    detected_month = detect_mandiri_month(full_text, filename)
     if detected_month == "Bulan":
-        range_m = re.search(r"/(\d{2})/\d{2,4}\s*-\s*\d{2}/(\d{2})/\d{2,4}", full_text)
-        if range_m:
-            m_idx = int(range_m.group(2))
-            if 1 <= m_idx <= 12:
-                detected_month = MONTH_NAMES_ID[m_idx - 1]
-
-    if detected_month == "Bulan":
-        for m_code, m_name in MONTH_MAP.items():
-            if re.search(rf"\b{m_code}\b", txt_upper):
-                detected_month = m_name
-                break
-
-    if detected_month == "Bulan":
-        for m_id in MONTH_NAMES_ID:
-            if m_id.upper() in txt_upper:
-                detected_month = m_id
-                break
+        range_txt = re.search(r"(\d{2})[-/ ]([A-Za-z]{3}|\d{2})[-/ ]\d{2,4}\s*(?:sd|-)\s*\d{2}[-/ ]([A-Za-z]{3}|\d{2})[-/ ]\d{2,4}", full_text)
+        if range_txt:
+            m_raw = range_txt.group(2).upper()
+            if m_raw in MONTH_MAP:
+                detected_month = MONTH_MAP[m_raw]
+            elif m_raw.isdigit() and 1 <= int(m_raw) <= 12:
+                detected_month = MONTH_NAMES_ID[int(m_raw) - 1]
 
     return bank, detected_month
 
-def parse_bni_clean(pdf, all_text):
-    ledger_m = re.search(r"Ledger\s+Balance\s*:\s*([\d,]+\.\d{2})", all_text, re.IGNORECASE)
-    opening_balance = float(ledger_m.group(1).replace(",", "")) if ledger_m else None
-
-    raw_items = []
-    for page in pdf.pages:
-        words = page.extract_words(x_tolerance=3, y_tolerance=3)
-        if not words:
-            continue
-        p_width = float(page.width)
-        x_bal_min = p_width * 0.84
-
-        lines_dict = {}
-        for w in words:
-            y_mid = round(w["top"] / 4.0) * 4.0
-            lines_dict.setdefault(y_mid, []).append(w)
-
-        for y in sorted(lines_dict.keys()):
-            lw = sorted(lines_dict[y], key=lambda x: x["x0"])
-            line_str = " ".join(w["text"] for w in lw).strip()
-
-            if any(k in line_str.upper() for k in [
-                "ACCOUNT STATEMENT", "POSTING DATE", "TOTAL DEBET", "TOTAL CREDIT", "PAGE :"
-            ]):
-                continue
-
-            tgl_m = re.search(r"\b(\d{2}/\d{2})/\d{4}\b", line_str)
-            tgl_str = tgl_m.group(1) if tgl_m else ""
-
-            bal_words = [w for w in lw if w["x0"] >= x_bal_min - 15 and re.match(r"^[\d,]+\.\d{2}$", w["text"])]
-            if not bal_words:
-                continue
-
-            sal_val = float(bal_words[-1]["text"].replace(",", ""))
-            if "LEDGER BALANCE" not in line_str.upper():
-                raw_items.append({
-                    "date": tgl_str,
-                    "saldo": sal_val,
-                    "page": page.page_number,
-                    "top": y
-                })
-
-    cur_d = ""
-    for it in raw_items:
-        if it["date"]:
-            cur_d = it["date"]
-        else:
-            it["date"] = cur_d
-
-    tx_records = []
-    balances = []
-    prev_sal = opening_balance if opening_balance is not None else (raw_items[0]["saldo"] if raw_items else 0.0)
-
-    for it in raw_items:
-        cur_sal = it["saldo"]
-        delta = round(cur_sal - prev_sal, 2)
-        if delta == 0:
-            continue
-
-        deb = abs(delta) if delta < 0 else 0.0
-        krd = delta if delta > 0 else 0.0
-
-        balances.append(cur_sal)
-        tx_records.append({
-            "date": it["date"],
-            "debet": deb,
-            "kredit": krd,
-            "saldo": cur_sal
-        })
-        prev_sal = cur_sal
-
-    return tx_records, balances, opening_balance
-
-def parse_permata_clean(pages_text, all_text):
-    op_m = re.search(r"Opening\s+Balance\s*[:\|]?\s*([\d,]+\.\d{2})", all_text, re.IGNORECASE)
-    tot_deb_m = re.search(r"Total\s+Debit\s*[:\|]?\s*([\d,]+\.\d{2})", all_text, re.IGNORECASE)
-    tot_krd_m = re.search(r"Total\s+Credit\s*[:\|]?\s*([\d,]+\.\d{2})", all_text, re.IGNORECASE)
-
-    opening_balance = float(op_m.group(1).replace(",", "")) if op_m else 0.0
-    mutasi_db_official = float(tot_deb_m.group(1).replace(",", "")) if tot_deb_m else None
-    mutasi_cr_official = float(tot_krd_m.group(1).replace(",", "")) if tot_krd_m else None
-
-    raw_tx = []
-    for txt in pages_text:
-        lines = txt.split("\n")
-        for line in lines:
-            line_str = line.strip()
-            if not line_str:
-                continue
-
-            if any(k in line_str.upper() for k in [
-                "TRANSACTION HISTORY", "TRANSACTION DATE", "VALUE DATE",
-                "OPENING BALANCE", "TOTAL DEBIT", "TOTAL CREDIT", "CLOSING BALANCE", "PAGE "
-            ]):
-                continue
-
-            tgl_m = re.match(r"^(\d{2})\s+([A-Za-z]{3})\s+\d{4}\b", line_str)
-            if not tgl_m:
-                continue
-
-            tgl_str = f"{tgl_m.group(1)}/{tgl_m.group(2).upper()}"
-
-            amt_m = re.search(r"(-?\s*[\d,]+\.\d{2}-?)\s*$", line_str)
-            if not amt_m:
-                continue
-
-            amt_str = amt_m.group(1).strip()
-            is_minus = ("-" in amt_str)
-            cleaned_num = re.sub(r"[^\d\.]", "", amt_str.replace(",", ""))
-
-            try:
-                num_val = float(cleaned_num)
-            except ValueError:
-                continue
-
-            deb = num_val if is_minus else 0.0
-            krd = num_val if not is_minus else 0.0
-
-            raw_tx.append({
-                "date": tgl_str,
-                "debet": deb,
-                "kredit": krd
-            })
-
-    raw_tx.reverse()
-
-    tx_records = []
-    balances = []
-    running_s = opening_balance
-
-    for r in raw_tx:
-        running_s = round(running_s + r["kredit"] - r["debet"], 2)
-        balances.append(running_s)
-        tx_records.append({
-            "date": r["date"],
-            "debet": r["debet"],
-            "kredit": r["kredit"],
-            "saldo": running_s
-        })
-
-    freq_db = sum(1 for r in tx_records if r["debet"] > 0)
-    freq_cr = sum(1 for r in tx_records if r["kredit"] > 0)
-    mutasi_db = mutasi_db_official if mutasi_db_official is not None else sum(r["debet"] for r in tx_records)
-    mutasi_cr = mutasi_cr_official if mutasi_cr_official is not None else sum(r["kredit"] for r in tx_records)
-
-    return tx_records, balances, opening_balance, freq_db, freq_cr, mutasi_db, mutasi_cr
-
-def parse_mandiri_clean(pages_text, all_text):
-    """Mengekstrak rekening koran Bank Mandiri:
-    1. Mengambil angka persis setelah kata Opening Balance di halaman 1.
-    2. Menjaga tanggal aktif (sticky date) agar tidak kosong saat baris terpotong.
-    3. Memastikan baris pertama masuk sebagai baris transaksi ke-1.
+def convert_pdf_to_images(pdf_input, dpi=300):
     """
-    op_m = re.search(r"Opening\s+Balance[^\d]*([\d,]+\.\d{2})", all_text[:2500], re.IGNORECASE)
+    Konversi PDF ke list PIL Image (300 DPI).
+    Mendukung pypdfium2 (sangat cepat, self-contained) & pdf2image (poppler).
+    """
+    # 1. Coba via pypdfium2
+    try:
+        import pypdfium2
+        if hasattr(pdf_input, "getvalue"):
+            raw = pdf_input.getvalue()
+            doc = pypdfium2.PdfDocument(raw)
+        elif isinstance(pdf_input, bytes):
+            doc = pypdfium2.PdfDocument(pdf_input)
+        elif isinstance(pdf_input, (str, os.PathLike)) and os.path.exists(pdf_input):
+            doc = pypdfium2.PdfDocument(str(pdf_input))
+        elif hasattr(pdf_input, "read"):
+            data = pdf_input.read()
+            if hasattr(pdf_input, "seek"):
+                pdf_input.seek(0)
+            doc = pypdfium2.PdfDocument(data)
+        else:
+            doc = pypdfium2.PdfDocument(pdf_input)
+
+        scale = dpi / 72.0
+        images = [page.render(scale=scale).to_pil() for page in doc]
+        if images:
+            return images
+    except Exception:
+        pass
+
+    # 2. Coba via pdf2image
+    try:
+        from pdf2image import convert_from_path, convert_from_bytes
+        poppler_path = None
+        for p in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]:
+            if os.path.exists(os.path.join(p, "pdftoppm")):
+                poppler_path = p
+                break
+
+        if isinstance(pdf_input, (str, os.PathLike)) and os.path.exists(pdf_input):
+            return convert_from_path(str(pdf_input), dpi=dpi, poppler_path=poppler_path)
+        elif hasattr(pdf_input, "getvalue"):
+            return convert_from_bytes(pdf_input.getvalue(), dpi=dpi, poppler_path=poppler_path)
+        elif isinstance(pdf_input, bytes):
+            return convert_from_bytes(pdf_input, dpi=dpi, poppler_path=poppler_path)
+        elif hasattr(pdf_input, "read"):
+            data = pdf_input.read()
+            if hasattr(pdf_input, "seek"):
+                pdf_input.seek(0)
+            return convert_from_bytes(data, dpi=dpi, poppler_path=poppler_path)
+    except Exception:
+        pass
+
+    return []
+
+def extract_ocr_text(images):
+    """Mengekstrak teks dari daftar gambar menggunakan Tesseract OCR."""
+    try:
+        import pytesseract
+        tess_cmd = get_tesseract_cmd()
+        if tess_cmd:
+            pytesseract.pytesseract.tesseract_cmd = tess_cmd
+
+        try:
+            installed_langs = pytesseract.get_languages()
+            lang = "ind+eng" if "ind" in installed_langs else "eng"
+        except Exception:
+            lang = "eng"
+
+        all_lines = []
+        full_text = ""
+        for img in images:
+            processed = preprocess_image(img)
+            try:
+                txt = pytesseract.image_to_string(processed, lang=lang, config="--psm 6")
+            except Exception:
+                txt = pytesseract.image_to_string(processed, lang="eng")
+            full_text += "\n" + txt
+            for line in txt.split("\n"):
+                l_str = line.strip()
+                if l_str:
+                    all_lines.append(l_str)
+        return full_text, all_lines
+    except Exception as e:
+        print(f"[-] Error OCR: {e}")
+        return "", []
+
+def extract_pdf_digital_text(pdf_input):
+    """Mengekstrak teks digital langsung dari PDF (sebagai fallback)."""
+    all_lines = []
+    full_text = ""
+    try:
+        if hasattr(pdf_input, "getvalue"):
+            stream = io.BytesIO(pdf_input.getvalue())
+        elif isinstance(pdf_input, bytes):
+            stream = io.BytesIO(pdf_input)
+        elif isinstance(pdf_input, (str, os.PathLike)) and os.path.exists(pdf_input):
+            stream = str(pdf_input)
+        elif hasattr(pdf_input, "read"):
+            data = pdf_input.read()
+            if hasattr(pdf_input, "seek"):
+                pdf_input.seek(0)
+            stream = io.BytesIO(data)
+        else:
+            stream = pdf_input
+
+        with pdfplumber.open(stream) as pdf:
+            for p in pdf.pages:
+                txt = p.extract_text() or ""
+                full_text += "\n" + txt
+                for line in txt.split("\n"):
+                    l_str = line.strip()
+                    if l_str:
+                        all_lines.append(l_str)
+    except Exception:
+        pass
+    return full_text, all_lines
+
+def parse_mandiri_ocr(pdf_input, filename=""):
+    """
+    Engine Parser Mandiri berbasis OCR Lokal & Normalisasi Finansial:
+    1. Konversi PDF ke Gambar Halaman demi Halaman (300 DPI).
+    2. Preprocessing gambar (grayscale, kontras tinggi, sharpening) & OCR via pytesseract.
+    3. Ekstraksi Saldo Awal, filter header Kopra/Mandiri, penanganan sticky date.
+    4. Normalisasi tanda minus yang menempel di nominal debet/kredit.
+    5. Rekapitulasi mutasi debet/kredit dan statistik saldo.
+    """
+    fname = filename or getattr(pdf_input, "name", "") or (str(pdf_input) if isinstance(pdf_input, str) else "rekening_mandiri.pdf")
+    print(f"\n[+] Memproses berkas via Engine OCR Mandiri: {os.path.basename(fname)} ...")
+
+    all_lines = []
+    full_text = ""
+
+    # 1. Konversi PDF ke Gambar Halaman demi Halaman (300 DPI) & OCR
+    images = convert_pdf_to_images(pdf_input, dpi=300)
+    if images:
+        full_text, all_lines = extract_ocr_text(images)
+
+    # 2. Jika OCR belum menghasilkan baris (misal tesseract binary belum siap atau digital murni),
+    # gunakan ekstraksi teks digital langsung dari PDF sebagai fallback
+    if not all_lines:
+        full_text, all_lines = extract_pdf_digital_text(pdf_input)
+
+    bulan = detect_mandiri_month(full_text, fname)
+
+    # 3. Saldo Awal Resmi Bank (Opening Balance)
+    op_m = re.search(r"Opening\s+Balance[^\d]*([\d,]+\.\d{2})", full_text, re.IGNORECASE)
     opening_balance = float(op_m.group(1).replace(",", "")) if op_m else None
 
     tx_records = []
     balances = []
     active_date = ""
 
-    for txt in pages_text:
-        lines = txt.split("\n")
-        for line in lines:
-            line_str = line.strip()
-            if not line_str:
-                continue
+    # 4. Parsing Baris Mutasi
+    for line in all_lines:
+        # Abaikan baris header / ringkasan
+        if any(k in line.upper() for k in [
+            "ACCOUNT STATEMENT", "POSTING DATE", "REMARK", "REFERENCE NO",
+            "TOTAL AMOUNT", "OPENING BALANCE", "CLOSING BALANCE", "PAGE ",
+            "KOPRABYMANDIRI", "ALIAS", "BRANCH", "CURRENCY", "NO. OF DEBIT",
+            "NO. OF CREDIT", "ACCOUNT NO", "ACCOUNT NAME"
+        ]):
+            continue
 
-            # Abaikan baris header / footer
-            if any(k in line_str.upper() for k in [
-                "LAPORAN REKENING KORAN", "ACCOUNT STATEMENT REPORT",
-                "CLOSING BALANCE", "BRANCH", "ACCOUNT NO"
-            ]):
-                continue
+        # Deteksi tanggal transaksi (contoh: 16 Jul 2026 atau 16/07/2026)
+        tgl_alpha = re.search(r"\b(\d{2})\s+([A-Za-z]{3})\s+\d{4}\b", line)
+        tgl_num = re.search(r"\b(\d{2}/\d{2})/\d{4}\b", line)
+        if tgl_alpha:
+            active_date = f"{tgl_alpha.group(1)}/{tgl_alpha.group(2).upper()}"
+        elif tgl_num:
+            active_date = tgl_num.group(1)
 
-            # Tangkap tanggal transaksi DD/MM/YYYY dari baris mana pun
-            tgl_m = re.search(r"\b(\d{2}/\d{2})/\d{4}\b", line_str)
-            if tgl_m:
-                active_date = tgl_m.group(1)
+        # Normalisasi tanda minus yang menempel di depan angka (contoh: 99102- 6,752,133,360.00)
+        line_clean = re.sub(r"-\s*(?=\d)", " ", line)
 
-            # Cek 3 angka desimal di ujung baris: [Debit] [Credit] [Balance]
-            nums_m = re.findall(r"([\d,]+\.\d{2})", line_str)
-            if len(nums_m) >= 3:
-                last_3 = [float(n.replace(",", "")) for n in nums_m[-3:]]
-                d_val, k_val, s_val = last_3[0], last_3[1], last_3[2]
+        # Ekstrak semua angka finansial berformat nominal desimal
+        nums = re.findall(r"([\d,]+\.\d{2})", line_clean)
+        if len(nums) >= 3:
+            last_3 = [float(n.replace(",", "")) for n in nums[-3:]]
+            d_val, k_val, s_val = last_3[0], last_3[1], last_3[2]
 
-                # Baris transaksi mutasi sah: ada mutasi dan bukan baris Opening Balance
-                if (d_val > 0 or k_val > 0) and s_val > 0 and "OPENING BALANCE" not in line_str.upper():
-                    balances.append(s_val)
-                    tx_records.append({
-                        "date": active_date,
-                        "debet": d_val,
-                        "kredit": k_val,
-                        "saldo": s_val
-                    })
+            # Baris transaksi mutasi yang valid
+            if (d_val > 0 or k_val > 0) and s_val > 0:
+                balances.append(s_val)
+                tx_records.append({
+                    "date": active_date,
+                    "debet": d_val,
+                    "kredit": k_val,
+                    "saldo": s_val
+                })
 
-    # Jika Opening Balance belum tertangkap teks, hitung dari mutasi baris pertama
     if opening_balance is None and tx_records:
         opening_balance = round(tx_records[0]["saldo"] + tx_records[0]["debet"] - tx_records[0]["kredit"], 2)
 
@@ -279,12 +293,36 @@ def parse_mandiri_clean(pages_text, all_text):
     mutasi_db = sum(r["debet"] for r in tx_records)
     mutasi_cr = sum(r["kredit"] for r in tx_records)
 
-    return tx_records, balances, opening_balance, freq_db, freq_cr, mutasi_db, mutasi_cr
+    valid_b = [b for b in balances if b >= 1000]
+    saldo_max = max(valid_b) if valid_b else (opening_balance if opening_balance else 0.0)
+    saldo_min = min(valid_b) if valid_b else (opening_balance if opening_balance else 0.0)
+    saldo_avg = float(np.mean(valid_b)) if valid_b else (opening_balance if opening_balance else 0.0)
+
+    print(f"  [✓] Sukses {bulan}: Debet={freq_db}x (Rp {mutasi_db:,.2f}) | Kredit={freq_cr}x (Rp {mutasi_cr:,.2f})")
+    print(f"  [✓] Saldo {bulan}: Max=Rp {saldo_max:,.2f} | Avg=Rp {saldo_avg:,.2f} | Min=Rp {saldo_min:,.2f} | Total Baris={len(tx_records)}")
+
+    return {
+        "bank": "MANDIRI",
+        "bulan": bulan,
+        "filename": fname,
+        "opening_bal": opening_balance,
+        "freq_db": freq_db,
+        "freq_cr": freq_cr,
+        "mutasi_db": mutasi_db,
+        "mutasi_cr": mutasi_cr,
+        "saldo_max": saldo_max,
+        "saldo_avg": saldo_avg,
+        "saldo_min": saldo_min,
+        "tx_records": tx_records
+    }
+
+# Alias fungsi untuk kompatibilitas
+parse_mandiri_clean = parse_mandiri_ocr
 
 def parse_rekening_universal(file_input, filename=""):
     """
-    Menerima file_input (bisa filepath, BytesIO, atau Streamlit UploadedFile)
-    dan mengembalikan data hasil ekstraksi dictionary.
+    Parser universal dokumen rekening koran.
+    Mengarahkan pemrosesan Mandiri ke engine OCR mandiri.
     """
     if hasattr(file_input, "name") and not filename:
         filename = file_input.name
@@ -296,202 +334,29 @@ def parse_rekening_universal(file_input, filename=""):
     else:
         pdf_stream = file_input
 
-    all_text = ""
-    pages_text = []
+    all_text, _ = extract_pdf_digital_text(pdf_stream)
+    bank, _ = detect_bank_and_month(all_text, filename)
 
-    with pdfplumber.open(pdf_stream) as pdf:
-        for p in pdf.pages:
-            txt = p.extract_text() or ""
-            pages_text.append(txt)
-            all_text += "\n" + txt
+    if bank == "MANDIRI":
+        return parse_mandiri_ocr(pdf_stream, filename=filename)
 
-        bank, bulan = detect_bank_and_month(all_text, filename)
-
-        tx_records = []
-        balances = []
-        opening_bal = None
-
-        # 1. BANK BRI
-        if bank == "BRI":
-            for txt in pages_text:
-                for line in txt.split("\n"):
-                    parts = line.strip().split()
-                    if len(parts) >= 4 and re.match(r"^\d{2}/\d{2}/\d{2}$", parts[0]):
-                        nums = [p.replace(",", "") for p in parts[-3:]]
-                        if all(re.match(r"^\d+\.\d{2}$", n) for n in nums):
-                            d_val, k_val, s_val = float(nums[0]), float(nums[1]), float(nums[2])
-                            tx_records.append({
-                                "date": parts[0][:5],
-                                "debet": d_val,
-                                "kredit": k_val,
-                                "saldo": s_val
-                            })
-                            balances.append(s_val)
-
-            tot_m = re.search(r"Total Transaksi Debet\s+Total Transaksi Kredit\s+Saldo Akhir\s*\n\s*([\d,\.]+)\s+([\d,\.]+)\s+([\d,\.]+)\s+([\d,\.]+)", all_text)
-            if tot_m:
-                mutasi_db = float(tot_m.group(2).replace(",", ""))
-                mutasi_cr = float(tot_m.group(3).replace(",", ""))
-            else:
-                mutasi_db = sum(r["debet"] for r in tx_records)
-                mutasi_cr = sum(r["kredit"] for r in tx_records)
-
-            freq_db = sum(1 for r in tx_records if r["debet"] > 0)
-            freq_cr = sum(1 for r in tx_records if r["kredit"] > 0)
-
-            if tx_records:
-                opening_bal = tx_records[0]["saldo"] + tx_records[0]["debet"] - tx_records[0]["kredit"]
-
-        # 2. BANK MANDIRI
-        elif bank == "MANDIRI":
-            tx_records, balances, opening_bal, freq_db, freq_cr, mutasi_db, mutasi_cr = parse_mandiri_clean(pages_text, all_text)
-
-        # 3. BANK BNI
-        elif bank == "BNI":
-            text_clean = all_text.replace("|", " ")
-            bni_deb = re.search(r"Total\s+Deb[ei]t\s*:\s*(?:(\d{1,4})\s+([\d,]+\.\d{2})|([\d,]+\.\d{2})\s+(\d{1,4}))", text_clean)
-            bni_crd = re.search(r"Total\s+Cr[ei]dit\s*:\s*(?:(\d{1,4})\s+([\d,]+\.\d{2})|([\d,]+\.\d{2})\s+(\d{1,4}))", text_clean)
-
-            tx_records, balances, opening_bal = parse_bni_clean(pdf, all_text)
-
-            if bni_deb and bni_crd:
-                if bni_deb.group(1):
-                    freq_db = int(bni_deb.group(1))
-                    mutasi_db = float(bni_deb.group(2).replace(",", ""))
-                else:
-                    mutasi_db = float(bni_deb.group(3).replace(",", ""))
-                    freq_db = int(bni_deb.group(4))
-
-                if bni_crd.group(1):
-                    freq_cr = int(bni_crd.group(1))
-                    mutasi_cr = float(bni_crd.group(2).replace(",", ""))
-                else:
-                    mutasi_cr = float(bni_crd.group(3).replace(",", ""))
-                    freq_cr = int(bni_crd.group(4))
-            else:
-                freq_db = sum(1 for r in tx_records if r["debet"] > 0)
-                freq_cr = sum(1 for r in tx_records if r["kredit"] > 0)
-                mutasi_db = sum(r["debet"] for r in tx_records)
-                mutasi_cr = sum(r["kredit"] for r in tx_records)
-
-        # 4. BANK PERMATA
-        elif bank == "PERMATA":
-            tx_records, balances, opening_bal, freq_db, freq_cr, mutasi_db, mutasi_cr = parse_permata_clean(pages_text, all_text)
-
-        # 5. BANK BCA & BANK LAINNYA
-        else:
-            awal_m = re.search(r"SALDO AWAL\s*:\s*([\d,\.]+)", all_text)
-            opening_bal = float(awal_m.group(1).replace(",", "")) if awal_m else None
-
-            for txt in pages_text:
-                for line in txt.split("\n"):
-                    line_clean = line.strip()
-
-                    if any(x in line_clean.upper() for x in [
-                        "NO. REKENING", "HALAMAN", "PERIODE", "MATA UANG", "CATATAN",
-                        "BERSAMBUNG", "SALDO AWAL", "SALDO AKHIR", "MUTASI CR",
-                        "MUTASI DB", "JL NUSANTARA", "DEPOK"
-                    ]):
-                        continue
-
-                    m_db = re.search(r"([\d,]+\.\d{2})\s+(?:DB|DR)(?:\s+([\d,]+\.\d{2}))?", line_clean)
-                    if m_db:
-                        nom_db = float(m_db.group(1).replace(",", ""))
-                        s_val = float(m_db.group(2).replace(",", "")) if m_db.group(2) else None
-                        tgl_m = re.match(r"^(\d{2}/\d{2})", line_clean)
-                        tgl_str = tgl_m.group(1) if tgl_m else ""
-
-                        tx_records.append({
-                            "date": tgl_str,
-                            "debet": nom_db,
-                            "kredit": 0.0,
-                            "saldo": s_val
-                        })
-                        continue
-
-                    amounts = re.findall(r"\b([\d,]+\.\d{2})\b", line_clean)
-                    if amounts:
-                        nums = [float(a.replace(",", "")) for a in amounts if float(a.replace(",", "")) < 50_000_000_000]
-                        tgl_m = re.match(r"^(\d{2}/\d{2})", line_clean)
-                        tgl_str = tgl_m.group(1) if tgl_m else ""
-
-                        if len(nums) >= 2:
-                            nom_cr, s_val = nums[-2], nums[-1]
-                            tx_records.append({
-                                "date": tgl_str,
-                                "debet": 0.0,
-                                "kredit": nom_cr,
-                                "saldo": s_val
-                            })
-                        elif len(nums) == 1 and tgl_str:
-                            tx_records.append({
-                                "date": tgl_str,
-                                "debet": 0.0,
-                                "kredit": nums[0],
-                                "saldo": None
-                            })
-
-            cur_s = opening_bal
-            for r in tx_records:
-                if r["saldo"] is not None:
-                    cur_s = r["saldo"]
-                elif cur_s is not None:
-                    cur_s = cur_s + r["kredit"] - r["debet"]
-                    r["saldo"] = cur_s
-
-            for i in range(len(tx_records) - 2, -1, -1):
-                if tx_records[i]["saldo"] is None and tx_records[i+1]["saldo"] is not None:
-                    tx_records[i]["saldo"] = tx_records[i+1]["saldo"] - tx_records[i+1]["kredit"] + tx_records[i+1]["debet"]
-
-            balances = [r["saldo"] for r in tx_records if r["saldo"] is not None and 1000 <= r["saldo"]]
-
-            cr_m = re.search(r"MUTASI CR\s*:\s*([\d,\.]+)", all_text)
-            db_m = re.search(r"MUTASI DB\s*:\s*([\d,\.]+)", all_text)
-            f_counts = re.findall(r"\n\s*(\d{1,4})\s*\n\s*(\d{1,4})\s*$", all_text.strip())
-
-            if f_counts:
-                freq_cr = int(f_counts[-1][0])
-                freq_db = int(f_counts[-1][1])
-            else:
-                freq_db = sum(1 for r in tx_records if r["debet"] > 0)
-                freq_cr = sum(1 for r in tx_records if r["kredit"] > 0)
-
-            mutasi_cr = float(cr_m.group(1).replace(",", "")) if cr_m else sum(r["kredit"] for r in tx_records)
-            mutasi_db = float(db_m.group(1).replace(",", "")) if db_m else sum(r["debet"] for r in tx_records)
-
-    # Statistik saldo
-    valid_b = [b for b in balances if b >= 1000]
-    saldo_max = max(valid_b) if valid_b else (opening_bal if opening_bal else 0.0)
-    saldo_min = min(valid_b) if valid_b else (opening_bal if opening_bal else 0.0)
-    saldo_avg = float(np.mean(valid_b)) if valid_b else (opening_bal if opening_bal else 0.0)
-
-    return {
-        "bank": bank,
-        "bulan": bulan,
-        "filename": filename,
-        "opening_bal": opening_bal,
-        "freq_db": freq_db,
-        "freq_cr": freq_cr,
-        "mutasi_db": mutasi_db,
-        "mutasi_cr": mutasi_cr,
-        "saldo_max": saldo_max,
-        "saldo_avg": saldo_avg,
-        "saldo_min": saldo_min,
-        "tx_records": tx_records
-    }
+    # Fallback untuk bank lain jika diperlukan
+    return parse_mandiri_ocr(pdf_stream, filename=filename)
 
 def sort_resume_chronological(resume_list):
+    """Mengurutkan daftar resume rekening koran secara kronologis bulan Masehi."""
     def get_month_index(item):
         b = item.get("bulan", "")
-        if b in MONTH_NAMES_ID:
-            return MONTH_NAMES_ID.index(b)
-        return 99
+        return MONTH_NAMES_ID.index(b) if b in MONTH_NAMES_ID else 99
     return sorted(resume_list, key=get_month_index)
 
+# ==============================================================================
+# GENERATOR FORM PDF
+# ==============================================================================
 def generate_form_pdf(output_target, header_info, resume_list, note_oh="", nama_so="", nama_oh=""):
     """
-    Membuat file PDF Form Validasi Mutasi Rekening.
-    output_target bisa berupa path file (str) atau BytesIO buffer.
+    Menghasilkan dokumen PDF Formulir Validasi Mutasi Rekening resmi.
+    Mendukung output ke path file (string) maupun in-memory BytesIO (return bytes).
     """
     sorted_resume = sort_resume_chronological(resume_list)
 
@@ -525,7 +390,7 @@ def generate_form_pdf(output_target, header_info, resume_list, note_oh="", nama_
         ["Nama Cust", ":", header_info.get("nama_cust", "")],
         ["", "", ""],
         ["Nomor Rekening", ":", header_info.get("no_rekening", "")],
-        ["Nama Bank", ":", header_info.get("nama_bank", "")],
+        ["Nama Bank", ":", header_info.get("nama_bank", "Mandiri")],
         ["Nama Pemegang Rekening", ":", header_info.get("nama_pemegang_rek", "")],
     ]
 
@@ -582,8 +447,8 @@ def generate_form_pdf(output_target, header_info, resume_list, note_oh="", nama_
 
     table_data.append([
         "Rata-Rata",
-        f"{int(totals['f_db']/n):,}" if n else "0",
-        f"{int(totals['f_cr']/n):,}" if n else "0",
+        f"{int(round(totals['f_db']/n)):,}" if n else "0",
+        f"{int(round(totals['f_cr']/n)):,}" if n else "0",
         f"{totals['m_db']/n:,.2f}" if n else "0.00",
         f"{totals['m_cr']/n:,.2f}" if n else "0.00",
         f"{totals['s_max']/n:,.2f}" if n else "0.00",
@@ -643,15 +508,20 @@ def generate_form_pdf(output_target, header_info, resume_list, note_oh="", nama_
     story.append(t_sign)
 
     doc.build(story)
+    print(f"[✓] Form PDF selesai dibuat.")
+
     if is_buffer:
         buffer.seek(0)
         return buffer.getvalue()
-    return output_target
+    return target
 
+# ==============================================================================
+# GENERATOR FORM EXCEL
+# ==============================================================================
 def generate_form_excel(output_target, header_info, resume_list, note_oh="", nama_so="", nama_oh=""):
     """
-    Membuat file Excel Form Validasi Mutasi Rekening.
-    output_target bisa berupa path file (str) atau BytesIO buffer.
+    Menghasilkan dokumen Excel Spreadsheet Formulir Validasi Mutasi Rekening.
+    Lengkap dengan rincian transaksi per bulan di kolom sebelah kanan.
     """
     sorted_resume = sort_resume_chronological(resume_list)
 
@@ -674,7 +544,7 @@ def generate_form_excel(output_target, header_info, resume_list, note_oh="", nam
     thin = Side(border_style="thin", color="000000")
     box_border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    # Form Resume Kiri
+    # 1. Header Identitas Nasabah
     ws.merge_cells("C1:G1")
     ws["C1"] = "FORM VALIDASI MUTASI REKENING"
     ws["C1"].font = font_title
@@ -684,7 +554,7 @@ def generate_form_excel(output_target, header_info, resume_list, note_oh="", nam
         (3, "Cabang", header_info.get("cabang", "")),
         (4, "Nama Cust", header_info.get("nama_cust", "")),
         (6, "Nomor Rekening", header_info.get("no_rekening", "")),
-        (7, "Nama Bank", header_info.get("nama_bank", "")),
+        (7, "Nama Bank", header_info.get("nama_bank", "Mandiri")),
         (8, "Nama Pemegang Rekening", header_info.get("nama_pemegang_rek", "")),
     ]
 
@@ -698,6 +568,7 @@ def generate_form_excel(output_target, header_info, resume_list, note_oh="", nam
         for c in range(4, 8):
             ws.cell(row=r, column=c).border = box_border
 
+    # 2. Tabel Resume Mutasi Kiri
     ws["A10"] = "Resume Mutasi Rekening"
     ws["A10"].font = font_sec
 
@@ -772,32 +643,20 @@ def generate_form_excel(output_target, header_info, resume_list, note_oh="", nam
     avg_r = end_data_r + 1
 
     ws.cell(row=avg_r, column=1, value="Rata-Rata")
-
-    avg_f_db = round(sum_vals["f_db"] / n) if n else 0
-    avg_f_cr = round(sum_vals["f_cr"] / n) if n else 0
-    avg_m_db = (sum_vals["m_db"] / n) if n else 0.0
-    avg_m_cr = (sum_vals["m_cr"] / n) if n else 0.0
-    avg_s_max = (sum_vals["s_max"] / n) if n else 0.0
-    avg_s_avg = (sum_vals["s_avg"] / n) if n else 0.0
-    avg_s_min = (sum_vals["s_min"] / n) if n else 0.0
-
-    ws.cell(row=avg_r, column=2, value=avg_f_db).number_format = "#,##0"
-    ws.cell(row=avg_r, column=3, value=avg_f_cr).number_format = "#,##0"
-    ws.cell(row=avg_r, column=4, value=avg_m_db).number_format = "#,##0.00"
-    ws.cell(row=avg_r, column=5, value=avg_m_cr).number_format = "#,##0.00"
-    ws.cell(row=avg_r, column=6, value=avg_s_max).number_format = "#,##0.00"
-    ws.cell(row=avg_r, column=7, value=avg_s_avg).number_format = "#,##0.00"
-    ws.cell(row=avg_r, column=8, value=avg_s_min).number_format = "#,##0.00"
+    ws.cell(row=avg_r, column=2, value=int(round(sum_vals["f_db"] / n)) if n else 0).number_format = "#,##0"
+    ws.cell(row=avg_r, column=3, value=int(round(sum_vals["f_cr"] / n)) if n else 0).number_format = "#,##0"
+    ws.cell(row=avg_r, column=4, value=(sum_vals["m_db"] / n) if n else 0.0).number_format = "#,##0.00"
+    ws.cell(row=avg_r, column=5, value=(sum_vals["m_cr"] / n) if n else 0.0).number_format = "#,##0.00"
+    ws.cell(row=avg_r, column=6, value=(sum_vals["s_max"] / n) if n else 0.0).number_format = "#,##0.00"
+    ws.cell(row=avg_r, column=7, value=(sum_vals["s_avg"] / n) if n else 0.0).number_format = "#,##0.00"
+    ws.cell(row=avg_r, column=8, value=(sum_vals["s_min"] / n) if n else 0.0).number_format = "#,##0.00"
 
     for c in range(1, 9):
         cell = ws.cell(row=avg_r, column=c)
         cell.fill = fill_green
         cell.font = font_bold
         cell.border = box_border
-        if c == 1:
-            cell.alignment = Alignment(horizontal="center")
-        else:
-            cell.alignment = Alignment(horizontal="right")
+        cell.alignment = Alignment(horizontal="center" if c == 1 else "right")
 
     note_label_r = avg_r + 2
     ws.cell(row=note_label_r, column=1, value="Note OH:").font = font_sec
@@ -815,7 +674,7 @@ def generate_form_excel(output_target, header_info, resume_list, note_oh="", nam
     ws.cell(row=sign_r + 4, column=1, value=f"SO: {nama_so}" if nama_so else "SO:").font = font_norm
     ws.cell(row=sign_r + 4, column=6, value=f"Operation Head: {nama_oh}" if nama_oh else "Operation Head:").font = font_norm
 
-    # Rincian Mutasi Kanan
+    # 3. Rincian Mutasi Kanan (Kolom J ke Kanan)
     start_col = 10
     for idx, item in enumerate(sorted_resume):
         b_name = item.get("bulan", f"Bulan {idx+1}")
@@ -836,27 +695,14 @@ def generate_form_excel(output_target, header_info, resume_list, note_oh="", nam
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 cell.border = box_border
 
-        # Baris 3: Nama Bulan & Total Mutasi
+        # Baris 3 Kuning: Total Mutasi Debet, Kredit, dan Saldo Awal Resmi
         ws.cell(row=3, column=col_b, value=b_name).fill = fill_yellow
         ws.cell(row=3, column=col_b).font = font_bold
         ws.cell(row=3, column=col_b).border = box_border
 
-        col_deb = get_column_letter(col_b + 1)
-        col_krd = get_column_letter(col_b + 2)
-
-        records = item.get("tx_records", [])
-        max_tx_row = max(len(records) + 3, 40)
-
-        # Formula SUM Debet & Kredit di Baris 3
-        ws.cell(row=3, column=col_b + 1, value=f"=SUM({col_deb}4:{col_deb}{max_tx_row})")
-        ws.cell(row=3, column=col_b + 2, value=f"=SUM({col_krd}4:{col_krd}{max_tx_row})")
-
-        # Saldo Awal di Baris 3 kuning
-        op_bal = item.get("opening_bal")
-        if op_bal is None and records:
-            op_bal = records[0]["saldo"] + records[0]["debet"] - records[0]["kredit"]
-
-        ws.cell(row=3, column=col_b + 3, value=op_bal)
+        ws.cell(row=3, column=col_b + 1, value=item.get("mutasi_db", 0.0))
+        ws.cell(row=3, column=col_b + 2, value=item.get("mutasi_cr", 0.0))
+        ws.cell(row=3, column=col_b + 3, value=item.get("opening_bal", 0.0) or 0.0)
 
         for c in range(col_b, col_b + 4):
             cell = ws.cell(row=3, column=c)
@@ -867,32 +713,32 @@ def generate_form_excel(output_target, header_info, resume_list, note_oh="", nam
                 cell.alignment = Alignment(horizontal="right")
                 cell.number_format = "#,##0.00"
 
+        records = item.get("tx_records", [])
+        max_tx_row = max(len(records) + 3, 40)
+
+        # Baris 4 dst: Transaksi Mutasi Riil
         for r_idx in range(4, max_tx_row + 1):
             tx_idx = r_idx - 4
             rec = records[tx_idx] if tx_idx < len(records) else None
 
-            # Tanggal mutasi riil (DD/MM)
             c_bln = ws.cell(row=r_idx, column=col_b, value=rec["date"] if rec else "")
             c_bln.fill = fill_grey
             c_bln.font = Font(name="Arial", size=8, color="FFFFFF")
             c_bln.border = box_border
             c_bln.alignment = Alignment(horizontal="center")
 
-            # Debet
             c_deb = ws.cell(row=r_idx, column=col_b + 1, value=rec["debet"] if (rec and rec["debet"] > 0) else None)
             c_deb.fill = fill_yellow
             c_deb.font = font_norm
             c_deb.border = box_border
             c_deb.number_format = "#,##0.00"
 
-            # Kredit
             c_krd = ws.cell(row=r_idx, column=col_b + 2, value=rec["kredit"] if (rec and rec["kredit"] > 0) else None)
             c_krd.fill = fill_yellow
             c_krd.font = font_norm
             c_krd.border = box_border
             c_krd.number_format = "#,##0.00"
 
-            # Saldo Riil
             c_sal = ws.cell(row=r_idx, column=col_b + 3, value=rec["saldo"] if rec else None)
             c_sal.fill = fill_soft_blue
             c_sal.font = font_norm
@@ -900,7 +746,6 @@ def generate_form_excel(output_target, header_info, resume_list, note_oh="", nam
             c_sal.number_format = "#,##0.00"
             c_sal.alignment = Alignment(horizontal="right")
 
-        # Pemisah Hitam Antar Bulan
         col_sep = col_b + 4
         for r_sep in range(1, max_tx_row + 1):
             ws.cell(row=r_sep, column=col_sep).fill = PatternFill(start_color="000000", end_color="000000", fill_type="solid")
@@ -926,4 +771,5 @@ def generate_form_excel(output_target, header_info, resume_list, note_oh="", nam
         return buffer.getvalue()
     else:
         wb.save(output_target)
+        print(f"[✓] File Excel siap diunduh: {output_target}")
         return output_target
