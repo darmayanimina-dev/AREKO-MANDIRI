@@ -488,7 +488,7 @@ def sort_resume_chronological(resume_list):
         return 99
     return sorted(resume_list, key=get_month_index)
 
-def generate_form_pdf(output_target, header_info, resume_list, note_oh="", nama_so=""):
+def generate_form_pdf(output_target, header_info, resume_list, note_oh="", nama_so="", nama_oh=""):
     """
     Membuat file PDF Form Validasi Mutasi Rekening.
     output_target bisa berupa path file (str) atau BytesIO buffer.
@@ -626,12 +626,13 @@ def generate_form_pdf(output_target, header_info, resume_list, note_oh="", nama_
     story.append(Spacer(1, 30))
 
     so_display = f"SO: {nama_so}" if nama_so else "SO:"
+    oh_display = f"Operation Head: {nama_oh}" if nama_oh else "Operation Head:"
     sign_data = [
         ["Mengajukan,", "Menyetujui,"],
         ["", ""],
         ["", ""],
         ["", ""],
-        [so_display, "Operation Head:"],
+        [so_display, oh_display],
     ]
     t_sign = Table(sign_data, colWidths=[275, 284])
     t_sign.setStyle(TableStyle([
@@ -647,7 +648,7 @@ def generate_form_pdf(output_target, header_info, resume_list, note_oh="", nama_
         return buffer.getvalue()
     return output_target
 
-def generate_form_excel(output_target, header_info, resume_list, note_oh="", nama_so=""):
+def generate_form_excel(output_target, header_info, resume_list, note_oh="", nama_so="", nama_oh=""):
     """
     Membuat file Excel Form Validasi Mutasi Rekening.
     output_target bisa berupa path file (str) atau BytesIO buffer.
@@ -812,7 +813,7 @@ def generate_form_excel(output_target, header_info, resume_list, note_oh="", nam
     ws.cell(row=sign_r, column=1, value="Mengajukan,").font = font_norm
     ws.cell(row=sign_r, column=6, value="Menyetujui,").font = font_norm
     ws.cell(row=sign_r + 4, column=1, value=f"SO: {nama_so}" if nama_so else "SO:").font = font_norm
-    ws.cell(row=sign_r + 4, column=6, value="Operation Head:").font = font_norm
+    ws.cell(row=sign_r + 4, column=6, value=f"Operation Head: {nama_oh}" if nama_oh else "Operation Head:").font = font_norm
 
     # Rincian Mutasi Kanan
     start_col = 10

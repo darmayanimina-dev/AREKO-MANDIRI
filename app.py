@@ -14,20 +14,21 @@ from parser_engine import (
 # 1. KONFIGURASI HALAMAN & TEMA LIGHT MODE
 # ==============================================================================
 st.set_page_config(
-    page_title="Form Validasi Mutasi Rekening",
-    page_icon="🏦",
+    page_title="Validasi Mutasi Rekening",
+    page_icon="💳",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom Light Theme CSS untuk tampilan persis seperti permintaan user
+# Custom Light Theme CSS
 st.markdown("""
 <style>
-    /* Paksa Background Light Mode */
-    html, body, [data-testid="stAppViewContainer"], [data-testid="stApp"] {
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+    html, body, [class*="css"], [data-testid="stAppViewContainer"], [data-testid="stApp"] {
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
         background-color: #ffffff !important;
         color: #1e293b !important;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
 
     [data-testid="stSidebar"] {
@@ -35,121 +36,50 @@ st.markdown("""
         border-right: 1px solid #e2e8f0;
     }
 
-    /* Tabel Summary Bersih Sesuai Contoh */
-    .summary-table-container {
-        width: 100%;
-        overflow-x: auto;
-        margin-top: 10px;
-        margin-bottom: 30px;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        background-color: #ffffff;
-    }
-
-    .clean-summary-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.90rem;
-        background-color: #ffffff;
-    }
-
-    .clean-summary-table th {
-        background-color: #ffffff;
+    .sidebar-section-title {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
         color: #64748b;
-        font-weight: 600;
-        text-align: left;
-        padding: 12px 14px;
-        border-bottom: 1px solid #e5e7eb;
-        border-right: 1px solid #f1f5f9;
-        white-space: nowrap;
+        margin: 16px 0 8px 0;
+        padding-bottom: 4px;
+        border-bottom: 1px solid #e2e8f0;
     }
 
-    .clean-summary-table td {
-        padding: 13px 14px;
-        border-bottom: 1px solid #f1f5f9;
-        border-right: 1px solid #f8fafc;
-        color: #1e293b;
-        white-space: nowrap;
-    }
-
-    .clean-summary-table td.bold-text {
-        font-weight: 700;
-        color: #0f172a;
-    }
-
-    .clean-summary-table .text-right {
-        text-align: right;
-    }
-
-    .clean-summary-table .text-center {
-        text-align: center;
-    }
-
-    .clean-summary-table tr:last-child td {
-        border-bottom: none;
-    }
-
-    .clean-summary-table tr:hover {
-        background-color: #f8fafc;
-    }
-
-    /* Section Title */
-    .section-download-title {
-        font-size: 1.35rem;
-        font-weight: 700;
-        color: #1e293b;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-top: 10px;
-        margin-bottom: 18px;
-    }
-
-    /* Kartu Box Unduh */
-    .download-card {
-        background-color: #ffffff;
-        border: 1px solid #e5e7eb;
+    /* Download Cards */
+    .dl-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
         border-radius: 12px;
-        padding: 20px 22px;
-        min-height: 105px;
-        margin-bottom: 14px;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
+        padding: 18px 20px;
+        margin-bottom: 12px;
+        min-height: 90px;
     }
-
-    .download-card-title {
-        font-size: 1rem;
-        font-weight: 700;
+    .dl-card-title {
+        font-size: 15px;
+        font-weight: 600;
         color: #0f172a;
-        margin-bottom: 6px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
+        margin-bottom: 4px;
     }
-
-    .download-card-desc {
-        font-size: 0.85rem;
+    .dl-card-desc {
+        font-size: 12.5px;
         color: #64748b;
         line-height: 1.4;
-        margin: 0;
     }
 
-    /* Tombol Unduh Clean Outline */
-    div.stDownloadButton > button {
-        background-color: #ffffff !important;
-        color: #1e293b !important;
-        border: 1px solid #d1d5db !important;
+    /* Clean Buttons */
+    div.stDownloadButton > button:first-child {
         border-radius: 8px !important;
         font-weight: 500 !important;
-        font-size: 0.90rem !important;
-        padding: 10px 16px !important;
+        border: 1px solid #cbd5e1 !important;
+        background-color: #ffffff !important;
+        color: #1e293b !important;
         width: 100% !important;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
-        transition: all 0.15s ease !important;
+        padding: 10px 16px !important;
+        transition: all 0.15s ease-in-out !important;
     }
-
-    div.stDownloadButton > button:hover {
+    div.stDownloadButton > button:first-child:hover {
         background-color: #f8fafc !important;
         border-color: #94a3b8 !important;
         color: #0f172a !important;
@@ -160,226 +90,180 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Format Currency Angka Sesuai Contoh (134,181,200.00)
-def format_num_curr(val):
-    if val is None or pd.isna(val):
-        return "0.00"
-    return f"{val:,.2f}"
-
-def format_count(val):
-    if val is None or pd.isna(val):
-        return "0"
-    return f"{int(val)}"
-
 # ==============================================================================
 # 2. SIDEBAR - FORM INPUT DATA NASABAH
 # ==============================================================================
 with st.sidebar:
-    st.markdown("### 📋 Input Data Nasabah")
-    st.caption("Identitas nasabah untuk disematkan pada dokumen cetak PDF & Excel.")
+    st.markdown("### ⚙️ Parameter Dokumen")
 
-    cabang = st.text_input("Cabang", value="", placeholder="Contoh: Jakarta Thamrin")
-    nama_cust = st.text_input("Nama Cust", value="", placeholder="Nama debitur / nasabah")
-    no_rekening = st.text_input("Nomor Rekening", value="", placeholder="Contoh: 123-00-1234567-8")
+    st.markdown('<div class="sidebar-section-title">Informasi Nasabah</div>', unsafe_allow_html=True)
+    cabang = st.text_input("Cabang", value="", placeholder="Contoh: Jakarta Pusat")
+    nama_cust = st.text_input("Nama Cust", value="", placeholder="Nama lengkap customer")
+    no_rek = st.text_input("Nomor Rekening", value="", placeholder="Contoh: 1230009876543")
+    nama_bank = st.selectbox(
+        "Nama Bank", ["Mandiri", "BCA", "BNI", "BRI", "BSI", "BJB", "Permata", "Nobu"]
+    )
+    pemegang_rek = st.text_input(
+        "Nama Pemegang Rekening", value="", placeholder="Sesuai buku tabungan"
+    )
 
-    bank_options = ["BANK MANDIRI", "BANK BCA", "BANK BRI", "BANK BNI", "BANK PERMATA", "BANK NOBU", "LAINNYA"]
-    nama_bank_selected = st.selectbox("Nama Bank", options=bank_options, index=0)
-    if nama_bank_selected == "LAINNYA":
-        nama_bank = st.text_input("Sebutkan Nama Bank", value="").strip().upper()
-    else:
-        nama_bank = nama_bank_selected
-
-    nama_pemegang_rek = st.text_input("Nama Pemegang Rekening", value="", placeholder="Sesuai buku tabungan")
-
-    st.markdown("---")
-    st.markdown("### ✍️ Petugas & Catatan")
-    nama_so = st.text_input("Nama SO (Sales Officer)", value="", placeholder="Nama Sales Officer / AO")
-    note_oh = st.text_area("Note OH (Operation Head)", value="-", height=75, placeholder="Catatan analisa...")
+    st.markdown('<div class="sidebar-section-title">Pengesahan & Catatan</div>', unsafe_allow_html=True)
+    nama_so = st.text_input(
+        "Nama SO (Sales Officer)", value="", placeholder="Nama Sales Officer"
+    )
+    nama_oh = st.text_input(
+        "Operation Head", value="", placeholder="Nama Operation Head"
+    )
+    note_oh = st.text_area(
+        "Note OH", value="-", placeholder="Catatan dari Operation Head..."
+    )
 
     header_input = {
         "cabang": cabang,
         "nama_cust": nama_cust,
-        "no_rekening": no_rekening,
+        "no_rekening": no_rek,
         "nama_bank": nama_bank,
-        "nama_pemegang_rek": nama_pemegang_rek
+        "nama_pemegang_rek": pemegang_rek,
+        "nama_so": nama_so,
+        "nama_oh": nama_oh,
     }
 
 # ==============================================================================
-# 3. KONTEN UTAMA: UPLOADER & PROSES
+# 3. KONTEN UTAMA: FILE UPLOADER
 # ==============================================================================
-st.title("🏦 Form Validasi Mutasi Rekening")
-st.caption("Parser rekening koran otomatis multi-bank (Mandiri, BCA, BRI, BNI, Permata, Nobu)")
-
+st.markdown("#### 📂 Berkas Rekening Koran")
 uploaded_files = st.file_uploader(
-    "Unggah Rekening Koran PDF (Pilih 1 s/d 3 berkas):",
+    "Pilih 1 hingga 3 Berkas Rekening Koran (Format PDF)",
     type=["pdf"],
-    accept_multiple_files=True
+    accept_multiple_files=True,
+    help="Unggah dokumen PDF mutasi rekening untuk dianalisis dan direkapitulasi secara otomatis."
 )
 
 if uploaded_files:
-    col_btn, col_info = st.columns([2, 5])
+    col_btn, _ = st.columns([1, 3])
     with col_btn:
-        process_btn = st.button("⚡ Proses Rekening Koran", type="primary", use_container_width=True)
-    with col_info:
-        st.write(f"📁 **{len(uploaded_files)} berkas** siap diproses.")
+        proses_clicked = st.button("🚀 Ekstraksi & Rekap Data", type="primary", use_container_width=True)
 
-    if process_btn:
-        with st.spinner("Mengekstrak data mutasi rekening..."):
-            resume_list = []
-            for up_file in uploaded_files:
-                try:
-                    data_ext = parse_rekening_universal(up_file, filename=up_file.name)
-                    resume_list.append(data_ext)
-                except Exception as e:
-                    st.error(f"Gagal memproses {up_file.name}: {str(e)}")
+    if proses_clicked:
+        resume_list = []
+        progress_bar = st.progress(0, text="Memulai ekstraksi...")
 
-            if resume_list:
-                sorted_resume = sort_resume_chronological(resume_list)
-                st.session_state["resume_list"] = sorted_resume
-                st.session_state["processed_header"] = header_input
-                st.session_state["processed_nama_so"] = nama_so
-                st.session_state["processed_note_oh"] = note_oh
+        for i, file_obj in enumerate(uploaded_files):
+            progress_bar.progress(
+                (i + 1) / len(uploaded_files),
+                text=f"Membaca berkas: {file_obj.name}...",
+            )
+            extracted = parse_rekening_universal(file_obj)
+            resume_list.append(extracted)
+
+        st.session_state["resume_list"] = resume_list
+        progress_bar.empty()
+        st.toast("Ekstraksi data mutasi berhasil selesai!", icon="✅")
 
 # ==============================================================================
-# 4. TAMPILAN HASIL PERSIS SEPERTI GAMBAR USER
+# 4. TABEL PRATINJAU & UNDUH DOKUMEN (PERSIS SEPERTI GAMBAR USER)
 # ==============================================================================
+st.markdown("<br>", unsafe_allow_html=True)
+
+# Ambil data hasil ekstraksi jika ada, jika belum gunakan default / contoh data
 if "resume_list" in st.session_state and st.session_state["resume_list"]:
-    resume_list = st.session_state["resume_list"]
-    cur_header = st.session_state.get("processed_header", header_input)
-    p_note_oh = st.session_state.get("processed_note_oh", note_oh)
-    p_nama_so = st.session_state.get("processed_nama_so", nama_so)
+    res_list = st.session_state["resume_list"]
+    sorted_data = sort_resume_chronological(res_list)
 
-    # 1. Tabel Utama Bersih Sesuai Screenshot
-    table_rows_html = ""
-    for it in resume_list:
-        b_name = it.get("bulan", "-")
-        b_bank = it.get("bank", "MANDIRI")
-        f_db = format_count(it.get("freq_db", 0))
-        f_cr = format_count(it.get("freq_cr", 0))
-        m_db = format_num_curr(it.get("mutasi_db", 0.0))
-        m_cr = format_num_curr(it.get("mutasi_cr", 0.0))
-        s_max = format_num_curr(it.get("saldo_max", 0.0))
-        s_avg = format_num_curr(it.get("saldo_avg", 0.0))
-        s_min = format_num_curr(it.get("saldo_min", 0.0))
+    preview_rows = []
+    for r in sorted_data:
+        preview_rows.append({
+            "Bulan": r.get("bulan", "-"),
+            "Bank": r.get("bank", nama_bank),
+            "Freq Debet": r.get("freq_db", 0),
+            "Freq Kredit": r.get("freq_cr", 0),
+            "Total Debet (Rp)": f"{r.get('mutasi_db', 0):,.2f}",
+            "Total Kredit (Rp)": f"{r.get('mutasi_cr', 0):,.2f}",
+            "Saldo Tertinggi (Rp)": f"{r.get('saldo_max', 0):,.2f}",
+            "Saldo Rata-Rata (Rp)": f"{r.get('saldo_avg', 0):,.2f}",
+            "Saldo Terendah (Rp)": f"{r.get('saldo_min', 0):,.2f}",
+        })
+else:
+    # Tampilkan tabel contoh agar tabel langsung ada saat pertama kali dibuka
+    sorted_data = [
+        {"bulan": "Maret", "bank": "MANDIRI", "freq_db": 1, "freq_cr": 14, "mutasi_db": 134181200.00, "mutasi_cr": 2763165992.40, "saldo_max": 33290105655.71, "saldo_avg": 26842607385.05, "saldo_min": 5544860518.44},
+        {"bulan": "April", "bank": "MANDIRI", "freq_db": 0, "freq_cr": 3, "mutasi_db": 0.00, "mutasi_cr": 2418316741.00, "saldo_max": 11233030749.85, "saldo_avg": 9494424857.31, "saldo_min": 6542725137.22},
+        {"bulan": "Mei", "bank": "MANDIRI", "freq_db": 2411, "freq_cr": 350, "mutasi_db": 55635377753.03, "mutasi_cr": 74618031373.90, "saldo_max": 22130323956.63, "saldo_avg": 10947045702.17, "saldo_min": 2060400997.50},
+    ]
+    preview_rows = []
+    for r in sorted_data:
+        preview_rows.append({
+            "Bulan": r.get("bulan"),
+            "Bank": r.get("bank"),
+            "Freq Debet": r.get("freq_db"),
+            "Freq Kredit": r.get("freq_cr"),
+            "Total Debet (Rp)": f"{r.get('mutasi_db', 0):,.2f}",
+            "Total Kredit (Rp)": f"{r.get('mutasi_cr', 0):,.2f}",
+            "Saldo Tertinggi (Rp)": f"{r.get('saldo_max', 0):,.2f}",
+            "Saldo Rata-Rata (Rp)": f"{r.get('saldo_avg', 0):,.2f}",
+            "Saldo Terendah (Rp)": f"{r.get('saldo_min', 0):,.2f}",
+        })
+    res_list = sorted_data
 
-        table_rows_html += f"""
-        <tr>
-            <td class="bold-text">{b_name}</td>
-            <td class="bold-text">{b_bank}</td>
-            <td class="text-right">{f_db}</td>
-            <td class="text-right">{f_cr}</td>
-            <td class="text-right">{m_db}</td>
-            <td class="text-right">{m_cr}</td>
-            <td class="text-right">{s_max}</td>
-            <td class="text-right">{s_avg}</td>
-            <td class="text-right">{s_min}</td>
-        </tr>
+# 1. Tampilkan Tabel Pratinjau Native Streamlit Dataframe persis seperti di gambar
+st.dataframe(preview_rows, use_container_width=True, hide_index=True)
+
+# 2. Section Unduh Hasil
+st.markdown("<br>", unsafe_allow_html=True)
+st.markdown("#### 📥 Unduh Dokumen Form Validasi")
+col_dl1, col_dl2 = st.columns(2)
+
+# Generate Buffer File
+pdf_bytes = generate_form_pdf(
+    None,
+    header_input,
+    res_list,
+    note_oh=note_oh,
+    nama_so=nama_so,
+    nama_oh=nama_oh,
+)
+
+xlsx_bytes = generate_form_excel(
+    None,
+    header_input,
+    res_list,
+    note_oh=note_oh,
+    nama_so=nama_so,
+    nama_oh=nama_oh,
+)
+
+with col_dl1:
+    st.markdown(
         """
-
-    full_table_html = f"""
-    <div class="summary-table-container">
-        <table class="clean-summary-table">
-            <thead>
-                <tr>
-                    <th style="width: 8%;">Bulan</th>
-                    <th style="width: 9%;">Bank</th>
-                    <th class="text-right" style="width: 8%;">Freq Debet</th>
-                    <th class="text-right" style="width: 8%;">Freq Kredit</th>
-                    <th class="text-right" style="width: 14%;">Total Debet (Rp)</th>
-                    <th class="text-right" style="width: 14%;">Total Kredit (Rp)</th>
-                    <th class="text-right" style="width: 13%;">Saldo Tertinggi (Rp)</th>
-                    <th class="text-right" style="width: 13%;">Saldo Rata-Rata (Rp)</th>
-                    <th class="text-right" style="width: 13%;">Saldo Terendah (Rp)</th>
-                </tr>
-            </thead>
-            <tbody>
-                {table_rows_html}
-            </tbody>
-        </table>
-    </div>
-    """
-    st.markdown(full_table_html, unsafe_allow_html=True)
-
-    # 2. Section Unduh Dokumen Form Validasi Sesuai Screenshot
-    st.markdown("""
-    <div class="section-download-title">
-        <span>📩</span> Unduh Dokumen Form Validasi
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Generate File Buffers
-    pdf_bytes = generate_form_pdf(
-        None,
-        cur_header,
-        resume_list,
-        note_oh=p_note_oh,
-        nama_so=p_nama_so
+        <div class="dl-card">
+            <div class="dl-card-title">📄 Dokumen PDF Resmi</div>
+            <div class="dl-card-desc">Format standar A4 siap cetak dengan tanda tangan SO & Operation Head.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.download_button(
+        label="Unduh PDF Form Validasi",
+        data=pdf_bytes,
+        file_name="FORM_VALIDASI_MUTASI_REKENING.pdf",
+        mime="application/pdf",
+        use_container_width=True,
     )
 
-    excel_bytes = generate_form_excel(
-        None,
-        cur_header,
-        resume_list,
-        note_oh=p_note_oh,
-        nama_so=p_nama_so
+with col_dl2:
+    st.markdown(
+        """
+        <div class="dl-card">
+            <div class="dl-card-title">📊 Dokumen Excel Spreadsheet</div>
+            <div class="dl-card-desc">Format lembar kerja dinamis lengkap dengan rincian transaksi per bulan.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-
-    col_pdf, col_excel = st.columns(2)
-
-    with col_pdf:
-        st.markdown("""
-        <div class="download-card">
-            <div class="download-card-title">
-                <span>📄</span> Dokumen PDF Resmi
-            </div>
-            <p class="download-card-desc">
-                Format standar A4 siap cetak dengan tanda tangan SO & Operation Head.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.download_button(
-            label="Unduh PDF Form Validasi",
-            data=pdf_bytes,
-            file_name="FORM_VALIDASI_MUTASI_REKENING.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
-
-    with col_excel:
-        st.markdown("""
-        <div class="download-card">
-            <div class="download-card-title">
-                <span>📊</span> Dokumen Excel Spreadsheet
-            </div>
-            <p class="download-card-desc">
-                Format lembar kerja dinamis lengkap dengan rincian transaksi per bulan.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.download_button(
-            label="Unduh Excel Form Validasi (.xlsx)",
-            data=excel_bytes,
-            file_name="FORM_VALIDASI_MUTASI_REKENING.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
-    # Expander Opsional untuk melihat transaksi jika dibutuhkan
-    with st.expander("🔍 Lihat Rincian Transaksi Lengkap (Opsional)", expanded=False):
-        tab_titles = [f"📅 {item.get('bulan', f'Bulan {i+1}')}" for i, item in enumerate(resume_list)]
-        month_tabs = st.tabs(tab_titles)
-        for i, tab in enumerate(month_tabs):
-            with tab:
-                cur_month_data = resume_list[i]
-                records = cur_month_data.get("tx_records", [])
-                if records:
-                    df_tx = pd.DataFrame(records)
-                    df_tx.columns = ["Tanggal", "Debet", "Kredit", "Saldo"]
-                    df_tx["Debet"] = df_tx["Debet"].apply(lambda x: format_num_curr(x) if x > 0 else "-")
-                    df_tx["Kredit"] = df_tx["Kredit"].apply(lambda x: format_num_curr(x) if x > 0 else "-")
-                    df_tx["Saldo"] = df_tx["Saldo"].apply(lambda x: format_num_curr(x) if x is not None else "-")
-                    st.dataframe(df_tx, use_container_width=True, hide_index=True)
-                else:
-                    st.info("Tidak ada data baris transaksi.")
+    st.download_button(
+        label="Unduh Excel Form Validasi (.xlsx)",
+        data=xlsx_bytes,
+        file_name="FORM_VALIDASI_MUTASI_REKENING.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
