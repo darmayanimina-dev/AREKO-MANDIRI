@@ -14,7 +14,7 @@ from parser_engine import (
 # 1. KONFIGURASI HALAMAN & TEMA LIGHT MODE
 # ==============================================================================
 st.set_page_config(
-    page_title="Validasi Mutasi Rekening",
+    page_title="AREKO - Let’s Make Recap Less Recap-y",
     page_icon="💳",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -129,8 +129,15 @@ with st.sidebar:
     }
 
 # ==============================================================================
-# 3. KONTEN UTAMA: FILE UPLOADER
+# 3. KONTEN UTAMA: HEADER & FILE UPLOADER
 # ==============================================================================
+st.markdown("""
+<div style="margin-bottom: 24px;">
+    <h1 style="font-size: 2.2rem; font-weight: 800; color: #0f172a; margin: 0; letter-spacing: -0.02em;">AREKO</h1>
+    <p style="font-size: 1.05rem; font-weight: 500; color: #64748b; margin-top: 4px; margin-bottom: 0;">Let’s Make Recap Less Recap-y</p>
+</div>
+""", unsafe_allow_html=True)
+
 st.markdown("#### 📂 Berkas Rekening Koran")
 uploaded_files = st.file_uploader(
     "Pilih 1 hingga 3 Berkas Rekening Koran (Format PDF)",

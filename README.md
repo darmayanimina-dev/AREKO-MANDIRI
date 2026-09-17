@@ -1,4 +1,4 @@
-# 🏦 AREKO-MANDIRI: Form Validasi Mutasi Rekening & Parser Multi-Bank
+# 🏦 AREKO: Let’s Make Recap Less Recap-y
 
 Aplikasi web berbasis **Streamlit** modern dengan desain **Light Mode** yang bersih dan profesional untuk melakukan otomatisasi ekstraksi mutasi rekening koran bank (*Bank Statement Parser*), kalkulasi saldo, dan pembuatan **Form Validasi Mutasi Rekening** resmi dalam format **PDF** dan **Excel (.xlsx)**.
 
