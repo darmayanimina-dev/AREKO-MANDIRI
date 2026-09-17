@@ -21,23 +21,14 @@ st.set_page_config(
 )
 
 # Inisialisasi Session State
-if "uploader_key" not in st.session_state:
-    st.session_state["uploader_key"] = 0
+if "form_ver" not in st.session_state:
+    st.session_state["form_ver"] = 0
 if "resume_list" not in st.session_state:
     st.session_state["resume_list"] = None
 
 def reset_all():
     st.session_state["resume_list"] = None
-    st.session_state["uploader_key"] += 1
-    st.session_state["inp_cabang"] = ""
-    st.session_state["inp_cust"] = ""
-    st.session_state["inp_rek"] = ""
-    st.session_state["inp_bank"] = "Mandiri"
-    st.session_state["inp_pemegang"] = ""
-    st.session_state["inp_so"] = ""
-    st.session_state["inp_oh"] = ""
-    st.session_state["inp_note"] = "-"
-    st.rerun()
+    st.session_state["form_ver"] += 1
 
 # Custom Light Theme CSS
 st.markdown("""
@@ -139,26 +130,27 @@ st.markdown("""
 # ==============================================================================
 # 2. SIDEBAR - FORM INPUT DATA NASABAH
 # ==============================================================================
+ver = st.session_state.get("form_ver", 0)
+
 with st.sidebar:
     st.markdown("### ⚙️ Parameter Dokumen")
 
     st.markdown('<div class="sidebar-section-title">Informasi Nasabah</div>', unsafe_allow_html=True)
-    cabang = st.text_input("Cabang", value=st.session_state.get("inp_cabang", ""), key="inp_cabang", placeholder="Contoh: Jakarta Pusat")
-    nama_cust = st.text_input("Nama Cust", value=st.session_state.get("inp_cust", ""), key="inp_cust", placeholder="Nama lengkap customer")
-    no_rek = st.text_input("Nomor Rekening", value=st.session_state.get("inp_rek", ""), key="inp_rek", placeholder="Contoh: 1230009876543")
+    cabang = st.text_input("Cabang", key=f"cabang_{ver}", placeholder="Contoh: Jakarta Pusat")
+    nama_cust = st.text_input("Nama Cust", key=f"cust_{ver}", placeholder="Nama lengkap customer")
+    no_rek = st.text_input("Nomor Rekening", key=f"rek_{ver}", placeholder="Contoh: 1230009876543")
 
-    nama_bank = st.text_input("Nama Bank", value="Mandiri", disabled=True, key="inp_bank")
+    nama_bank = st.text_input("Nama Bank", value="Mandiri", disabled=True, key=f"bank_{ver}")
 
-    pemegang_rek = st.text_input("Nama Pemegang Rekening", value=st.session_state.get("inp_pemegang", ""), key="inp_pemegang", placeholder="Sesuai buku tabungan")
+    pemegang_rek = st.text_input("Nama Pemegang Rekening", key=f"pemegang_{ver}", placeholder="Sesuai buku tabungan")
 
     st.markdown('<div class="sidebar-section-title">Pengesahan & Catatan</div>', unsafe_allow_html=True)
-    nama_so = st.text_input("Nama SO (Sales Officer)", value=st.session_state.get("inp_so", ""), key="inp_so", placeholder="Nama Sales Officer")
-    nama_oh = st.text_input("Operation Head", value=st.session_state.get("inp_oh", ""), key="inp_oh", placeholder="Nama Operation Head")
-    note_oh = st.text_area("Note OH", value=st.session_state.get("inp_note", "-"), key="inp_note", placeholder="Catatan dari Operation Head...")
+    nama_so = st.text_input("Nama SO (Sales Officer)", key=f"so_{ver}", placeholder="Nama Sales Officer")
+    nama_oh = st.text_input("Operation Head", key=f"oh_{ver}", placeholder="Nama Operation Head")
+    note_oh = st.text_area("Note OH", value="-", key=f"note_{ver}", placeholder="Catatan dari Operation Head...")
 
     st.markdown("---")
-    if st.button("🔄 Reset Form & Data", use_container_width=True):
-        reset_all()
+    st.button("🔄 Reset Form & Data", on_click=reset_all, use_container_width=True)
 
     header_input = {
         "cabang": cabang,
@@ -185,7 +177,7 @@ uploaded_files = st.file_uploader(
     "Pilih 1 hingga 3 Berkas Rekening Koran (Format PDF)",
     type=["pdf"],
     accept_multiple_files=True,
-    key=f"uploader_{st.session_state['uploader_key']}",
+    key=f"uploader_{ver}",
     help="Unggah dokumen PDF mutasi rekening untuk dianalisis dan direkapitulasi secara otomatis."
 )
 
@@ -194,8 +186,7 @@ if uploaded_files:
     with col_btn:
         proses_clicked = st.button("🚀 Ekstraksi & Rekap Data", type="primary", use_container_width=True)
     with col_rst:
-        if st.button("🔄 Reset", use_container_width=True):
-            reset_all()
+        st.button("🔄 Reset", on_click=reset_all, use_container_width=True)
 
     if proses_clicked:
         resume_list = []
