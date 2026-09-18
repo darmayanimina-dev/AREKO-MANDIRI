@@ -260,37 +260,18 @@ if st.session_state.get("resume_list"):
             "Saldo Terendah (Rp)": f"{avg_s_min:,.2f}",
         })
 
-        # KPI Cards Rata-Rata
-        st.markdown("#### 📊 Resume & Rata-Rata Mutasi Rekening")
-        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-        with col_m1:
-            st.metric(
-                label="Rata-Rata Mutasi Debet",
-                value=f"Rp {avg_m_db:,.2f}",
-                delta=f"{avg_f_db}x transaksi / bln",
-                delta_color="off"
-            )
-        with col_m2:
-            st.metric(
-                label="Rata-Rata Mutasi Kredit",
-                value=f"Rp {avg_m_cr:,.2f}",
-                delta=f"{avg_f_cr}x transaksi / bln",
-                delta_color="off"
-            )
-        with col_m3:
-            st.metric(
-                label="Rata-Rata Saldo Bulanan",
-                value=f"Rp {avg_s_avg:,.2f}",
-            )
-        with col_m4:
-            st.metric(
-                label="Rata-Rata Saldo Tertinggi",
-                value=f"Rp {avg_s_max:,.2f}",
-            )
+    # 1. Tabel Native Streamlit dengan Highlight Warna pada Baris Rata-Rata
+    df_preview = pd.DataFrame(preview_rows)
 
-    # 1. Tabel Native Streamlit
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.dataframe(preview_rows, use_container_width=True, hide_index=True)
+    def highlight_rata_rata(row):
+        if str(row.get("Bulan", "")).strip().lower() == "rata-rata":
+            return ["background-color: #E2EFDA; color: #0f5132; font-weight: 700;"] * len(row)
+        return [""] * len(row)
+
+    styled_df = df_preview.style.apply(highlight_rata_rata, axis=1)
+
+    st.markdown("#### 📋 Rekapitulasi Mutasi Rekening")
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
     # 2. Section Unduh Hasil
     st.markdown("<br>", unsafe_allow_html=True)
