@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from parser_engine import (
     parse_mandiri_ocr,
+    parse_rekening_universal,
     generate_form_pdf,
     generate_form_excel,
     sort_resume_chronological,
@@ -14,7 +15,7 @@ from parser_engine import (
 # 1. KONFIGURASI HALAMAN & TEMA LIGHT MODE
 # ==============================================================================
 st.set_page_config(
-    page_title="AREKO Mandiri - Let’s Make Recap Less Recap-y",
+    page_title="AREKO - Let’s Make Recap Less Recap-y",
     page_icon="💳",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -175,18 +176,18 @@ with st.sidebar:
 # ==============================================================================
 st.markdown("""
 <div style="margin-bottom: 24px;">
-    <h1 style="font-size: 2.2rem; font-weight: 800; color: #0f172a; margin: 0; letter-spacing: -0.02em;">AREKO - Mandiri</h1>
-    <p style="font-size: 1.05rem; font-weight: 500; color: #64748b; margin-top: 4px; margin-bottom: 0;">Let’s Make Recap Less Recap-y • Bank Mandiri</p>
+    <h1 style="font-size: 2.2rem; font-weight: 800; color: #0f172a; margin: 0; letter-spacing: -0.02em;">AREKO</h1>
+    <p style="font-size: 1.05rem; font-weight: 500; color: #64748b; margin-top: 4px; margin-bottom: 0;">Let’s Make Recap Less Recap-y</p>
 </div>
 """, unsafe_allow_html=True)
 
-st.markdown("#### 📂 Berkas Rekening Koran Mandiri")
+st.markdown("#### 📂 Berkas Rekening Koran")
 uploaded_files = st.file_uploader(
-    "Pilih 1 hingga 3 Berkas Rekening Koran Bank Mandiri (Format PDF)",
+    "Pilih 1 hingga 3 Berkas Rekening Koran (Format PDF)",
     type=["pdf"],
     accept_multiple_files=True,
     key=f"uploader_{ver}",
-    help="Unggah dokumen PDF mutasi rekening Mandiri untuk dianalisis dan direkapitulasi secara otomatis."
+    help="Unggah dokumen PDF mutasi rekening untuk dianalisis dan direkapitulasi secara otomatis."
 )
 
 if uploaded_files:
@@ -210,7 +211,7 @@ if uploaded_files:
 
         st.session_state["resume_list"] = resume_list
         progress_bar.empty()
-        st.toast("Ekstraksi data mutasi Mandiri berhasil selesai!", icon="✅")
+        st.toast("Ekstraksi data mutasi berhasil selesai!", icon="✅")
         st.rerun()
 
 # ==============================================================================
@@ -226,7 +227,7 @@ if st.session_state.get("resume_list"):
     for r in sorted_data:
         preview_rows.append({
             "Bulan": r.get("bulan", "-"),
-            "Bank": "Mandiri",
+            "Bank": "MANDIRI",
             "Freq Debet": r.get("freq_db", 0),
             "Freq Kredit": r.get("freq_cr", 0),
             "Total Debet (Rp)": f"{r.get('mutasi_db', 0):,.2f}",
@@ -249,7 +250,7 @@ if st.session_state.get("resume_list"):
         # Baris Rata-Rata di akhir tabel
         preview_rows.append({
             "Bulan": "Rata-Rata",
-            "Bank": "Mandiri",
+            "Bank": "MANDIRI",
             "Freq Debet": avg_f_db,
             "Freq Kredit": avg_f_cr,
             "Total Debet (Rp)": f"{avg_m_db:,.2f}",
@@ -269,12 +270,12 @@ if st.session_state.get("resume_list"):
 
     styled_df = df_preview.style.apply(highlight_rata_rata, axis=1)
 
-    st.markdown("#### 📋 Rekapitulasi Mutasi Rekening Mandiri")
+    st.markdown("#### 📋 Rekapitulasi Mutasi Rekening")
     st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
     # 2. Section Unduh Hasil
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("#### 📥 Unduh Dokumen Form Validasi Mandiri")
+    st.markdown("#### 📥 Unduh Dokumen Form Validasi")
     col_dl1, col_dl2 = st.columns(2)
 
     # Generate Buffer File
@@ -300,16 +301,16 @@ if st.session_state.get("resume_list"):
         st.markdown(
             """
             <div class="dl-card">
-                <div class="dl-card-title">📄 Dokumen PDF Resmi Mandiri</div>
+                <div class="dl-card-title">📄 Dokumen PDF Resmi</div>
                 <div class="dl-card-desc">Format standar A4 siap cetak dengan tanda tangan SO & Operation Head.</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
         st.download_button(
-            label="Unduh PDF Form Validasi Mandiri",
+            label="Unduh PDF Form Validasi",
             data=pdf_bytes,
-            file_name="FORM_VALIDASI_MUTASI_REKENING_MANDIRI.pdf",
+            file_name="FORM_VALIDASI_MUTASI_REKENING.pdf",
             mime="application/pdf",
             use_container_width=True,
         )
@@ -318,16 +319,16 @@ if st.session_state.get("resume_list"):
         st.markdown(
             """
             <div class="dl-card">
-                <div class="dl-card-title">📊 Dokumen Excel Spreadsheet Mandiri</div>
+                <div class="dl-card-title">📊 Dokumen Excel Spreadsheet</div>
                 <div class="dl-card-desc">Format lembar kerja dinamis lengkap dengan rincian transaksi per bulan.</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
         st.download_button(
-            label="Unduh Excel Form Validasi Mandiri (.xlsx)",
+            label="Unduh Excel Form Validasi (.xlsx)",
             data=xlsx_bytes,
-            file_name="FORM_VALIDASI_MUTASI_REKENING_MANDIRI.xlsx",
+            file_name="FORM_VALIDASI_MUTASI_REKENING.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
@@ -337,9 +338,9 @@ else:
     st.markdown("""
     <div class="empty-state-box" style="text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;">
         <div class="empty-state-icon" style="text-align: center;">📄</div>
-        <div class="empty-state-title" style="text-align: center;">Belum Ada Rekening Koran Mandiri yang Diproses</div>
+        <div class="empty-state-title" style="text-align: center;">Belum Ada Rekening Koran yang Diproses</div>
         <p class="empty-state-desc" style="text-align: center; margin: 0 auto;">
-            Silakan unggah berkas PDF rekening koran Mandiri di atas, lengkapi parameter dokumen di sidebar, lalu klik <b>Ekstraksi & Rekap Data</b> untuk menampilkan tabel ringkasan mutasi dan mengunduh formulir validasi.
+            Silakan unggah berkas PDF rekening koran di atas, lengkapi parameter dokumen di sidebar, lalu klik <b>Ekstraksi & Rekap Data</b> untuk menampilkan tabel ringkasan mutasi dan mengunduh formulir validasi.
         </p>
     </div>
     """, unsafe_allow_html=True)
